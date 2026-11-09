@@ -10,14 +10,13 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Tools
         run: |
           which xcodegen || brew install xcodegen
-          sudo xcode-select -s /Applications/Xcode_15.4.app || true
           xcodebuild -version
 
       - name: Generate project
