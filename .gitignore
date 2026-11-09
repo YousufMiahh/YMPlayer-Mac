@@ -1,0 +1,8 @@
+build/
+Pods/
+Podfile.lock
+*.xcodeproj
+*.xcworkspace
+Generated/
+.DS_Store
+*.dmg
