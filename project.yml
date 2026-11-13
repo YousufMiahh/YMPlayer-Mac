@@ -27,9 +27,10 @@ targets:
         LSApplicationCategoryType: public.app-category.entertainment
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: Developed by Yousuf Miah
+        # Plain http:// providers. Only this key: if NSAllowsArbitraryLoadsForMedia (or ...InWebContent /
+        # NSAllowsLocalNetworking) is also present, macOS ignores NSAllowsArbitraryLoads and blocks http.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-          NSAllowsArbitraryLoadsForMedia: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ymplayer.mac
