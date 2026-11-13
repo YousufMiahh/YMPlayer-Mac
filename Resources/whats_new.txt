@@ -1,3 +1,4 @@
+- Continue Watching: when you finish an episode, the next one takes its place, ready to start.
 - Downloads: smoother while downloading, saving a big file no longer freezes the app, and failed downloads don't leave files behind.
 - The next episode now also plays on in the mini player.
 - If a stream drops part-way through, it reconnects and carries on, instead of marking it watched and moving on.

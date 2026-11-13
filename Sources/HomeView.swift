@@ -35,7 +35,7 @@ struct HomeView: View {
                         ForEach(cont, id: \.item.id) { p in
                             PosterCard(item: p.item, width: 150,
                                        title: p.item.kind == .episode ? (p.item.seriesName ?? p.item.name) : p.item.name,
-                                       subtitle: (p.item.episodeLabel.map { $0 + "  ·  " } ?? "") + Fmt.clock(p.duration - p.position) + " left",
+                                       subtitle: (p.item.episodeLabel.map { $0 + "  ·  " } ?? "") + (p.position > 0 ? Fmt.clock(p.duration - p.position) + " left" : "Next episode"),
                                        progress: p.fraction,
                                        action: { resume(p) },
                                        extraMenu: { AnyView(Button("Remove from Continue Watching") { store.removeFromContinue(p) }) })

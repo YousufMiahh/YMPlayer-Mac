@@ -481,6 +481,16 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Done with this one: watched, and the next episode goes into Continue Watching, ready at the start.
+    private func finished(_ s: PlaySession) {
+        setWatched(s.item, true)
+        guard s.item.kind == .episode, let sid = s.item.seriesId,
+              let i = s.list.firstIndex(where: { $0.id == s.item.id }), i + 1 < s.list.count else { return }
+        let nx = s.list[i + 1]
+        guard nx.kind == .episode, nx.seriesId == sid, !data.watched.contains(nx.id), data.progress[nx.id] == nil else { return }
+        data.progress[nx.id] = WatchProgress(item: nx, position: 0, duration: 0, updated: Date())
+    }
+
     func moveInQueue(_ it: Item, to index: Int) {
         guard let i = data.queue.firstIndex(where: { $0.id == it.id }) else { return }
         let x = data.queue.remove(at: i)
@@ -497,7 +507,7 @@ final class AppStore: ObservableObject {
     func playNext() {
         guard let s = session, let nx = upNext else { return }
         // Watched only if you got near the end (play() saves where you were otherwise)
-        if player.duration > 60, player.time / player.duration >= 0.9 || player.duration - player.time < 60 { setWatched(s.item, true) }
+        if player.duration > 60, player.time / player.duration >= 0.9 || player.duration - player.time < 60 { finished(s) }
         if s.item.kind == .episode, s.list.contains(where: { $0.id == nx.id }) {
             play(nx, list: s.list, from: 0)
         } else {
@@ -509,7 +519,7 @@ final class AppStore: ObservableObject {
         guard let s = session, s.item.kind != .live, player.url != nil, player.duration > 60 else { return }
         let pos = player.time, dur = player.duration
         if pos / dur >= 0.9 || dur - pos < 60 {
-            if !data.watched.contains(s.item.id) || data.progress[s.item.id] != nil { setWatched(s.item, true) }
+            if !data.watched.contains(s.item.id) || data.progress[s.item.id] != nil { finished(s) }
         } else if pos > 20 {
             data.progress[s.item.id] = WatchProgress(item: s.item, position: pos, duration: dur, updated: Date())
         }
@@ -640,7 +650,7 @@ final class AppStore: ObservableObject {
             }
             return
         }
-        setWatched(s.item, true)
+        finished(s)
         if upNext != nil { playNext() } else { closePlayer() }
     }
 
