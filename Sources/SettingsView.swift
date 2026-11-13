@@ -161,6 +161,7 @@ struct SettingsView: View {
             Section("About") {
                 LabeledContent("Version", value: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")
                                + " (" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1") + ")")
+                Button("What's New") { store.showWhatsNew() }
                 Text("Developed by Yousuf Miah").foregroundStyle(.secondary)
             }
         }

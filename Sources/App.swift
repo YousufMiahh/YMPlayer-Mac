@@ -30,6 +30,7 @@ struct YMPlayerApp: App {
                         .keyboardShortcut(KeyEquivalent(Character(String(Page.allCases.firstIndex(of: p).map { $0 + 1 } ?? 1))), modifiers: .command)
                 }
                 Divider()
+                Button("What's New") { store.showWhatsNew() }
                 Button("Refresh Library") { store.refreshAll() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
             }
@@ -50,6 +51,9 @@ struct RootView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .sheet(isPresented: Binding(get: { store.whatsNew != nil && store.session == nil }, set: { if !$0 { store.whatsNew = nil } })) {
+            WhatsNewSheet(lines: store.whatsNew ?? []).preferredColorScheme(.dark)
+        }
         .tint(Theme.accent)
         .background(WindowFinder())
     }
@@ -131,5 +135,54 @@ private struct WindowFinder: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         if MainWindow.window == nil { DispatchQueue.main.async { MainWindow.window = nsView.window } }
+    }
+}
+
+/// "What's New in YM Player 1.0.N", after an update.
+struct WhatsNewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let lines: [String]
+
+    private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("What's New").font(.system(size: 24, weight: .bold))
+                    Text("YM Player " + version).foregroundStyle(.secondary)
+                }
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Circle().fill(Theme.accent).frame(width: 7, height: 7).offset(y: -2)
+                            line(l)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 380)
+            HStack {
+                Spacer()
+                Button("Got It") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26)
+        .frame(width: 520)
+    }
+
+    /// "Skip Intro: a button…" — the part before the colon in bold.
+    private func line(_ l: String) -> Text {
+        if let r = l.range(of: ": "), l.distance(from: l.startIndex, to: r.lowerBound) < 40 {
+            return Text(String(l[..<r.lowerBound])).bold() + Text(": " + String(l[r.upperBound...]))
+        }
+        return Text(l)
     }
 }

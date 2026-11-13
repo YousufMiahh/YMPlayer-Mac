@@ -29,7 +29,7 @@ jobs:
           set -o pipefail
           xcodebuild -workspace YMPlayer.xcworkspace -scheme YMPlayer -configuration Release \
             -derivedDataPath build ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO build 2>&1 | tee build.log | grep -E "error:|warning: unre|BUILD|\*\*" || true
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO MARKETING_VERSION=1.0.${{ github.run_number }} CURRENT_PROJECT_VERSION=${{ github.run_number }} build 2>&1 | tee build.log | grep -E "error:|warning: unre|BUILD|\*\*" || true
           test -d "build/Build/Products/Release/YM Player.app"
 
       - name: Report build errors
@@ -53,6 +53,7 @@ jobs:
           tag_name: v1.0.${{ github.run_number }}
           name: YM Player for Mac 1.0.${{ github.run_number }}
           files: YMPlayer.dmg
+          body_path: Resources/whats_new.txt
           make_latest: true
 
       - name: Test build name

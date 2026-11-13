@@ -87,7 +87,34 @@ final class AppStore: ObservableObject {
             Task { @MainActor in self?.saveCurrentProgress() }
         }
         if current != nil { startup() }
+        checkWhatsNew()
     }
+
+    // MARK: what's new
+
+    /// The summary shown after an update (Resources/whats_new.txt, also the GitHub release notes).
+    @Published var whatsNew: [String]?
+
+    static var whatsNewLines: [String] {
+        guard let u = Bundle.main.url(forResource: "whats_new", withExtension: "txt"),
+              let s = try? String(contentsOf: u, encoding: .utf8) else { return [] }
+        return s.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            .map { $0.hasPrefix("- ") ? String($0.dropFirst(2)) : $0 }
+    }
+
+    /// Once per new set of notes, and not on a fresh install (nothing has changed for a new user).
+    private func checkWhatsNew() {
+        let lines = AppStore.whatsNewLines
+        guard !lines.isEmpty else { return }
+        let key = String(lines.joined(separator: "\n").utf8.reduce(5381) { ($0 &* 33) &+ Int($1) }) // stable across launches
+        let seen = UserDefaults.standard.string(forKey: "whatsNewSeen")
+        if seen == key { return }
+        UserDefaults.standard.set(key, forKey: "whatsNewSeen")
+        if seen == nil && accounts.isEmpty { return }
+        whatsNew = lines
+    }
+
+    func showWhatsNew() { whatsNew = AppStore.whatsNewLines }
 
     var current: Account? { accounts.first { $0.id == currentId } }
     var api: XtreamAPI? { current.map { XtreamAPI($0) } }

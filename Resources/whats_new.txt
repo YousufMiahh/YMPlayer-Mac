@@ -1,0 +1,8 @@
+- Already watched: films and episodes get a ✓ once you've watched them. Right-click one to mark it yourself, or mark a whole season. Seasons show how far through you are.
+- Your Queue: right-click a film or episode and choose Add to Queue. It's a row on Home, and plays next when what you're watching ends.
+- Skip Intro: a Skip Intro button pops up during a series' opening titles (or press S).
+- Next Episode: a Next Episode card appears as the end credits start, and plays the next one, or the next in your Queue, when its timer fills (or press N).
+- Because you watched: new rows on Home recommend films and series from your provider, based on what you've watched lately.
+- Downloads: download a film, an episode, a season or every season to watch without streaming. They're saved to Movies → YM Player (change it in Settings) and listed on the new Downloads page, with time left.
+- Rename categories: right-click a category and choose Rename.
+- What's New: this summary now pops up after each update.
