@@ -27,6 +27,8 @@ final class Downloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
     private var account: UUID?
     private var task: URLSessionDownloadTask?
     private var runningId: String?
+    private var runToken = ""            // tells this download's callbacks from a cancelled earlier one
+    private var lastPublish = Date.distantPast
     private var lastBytes: Int64 = 0
     private var lastTick = Date()
     private lazy var session: URLSession = {
@@ -68,6 +70,9 @@ final class Downloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
         }
         pump()
     }
+
+    /** A removed account: its download list goes (the files stay in the folder). */
+    func forget(_ id: UUID) { try? FileManager.default.removeItem(at: listURL(id)) }
 
     private func listURL(_ id: UUID) -> URL { Storage.support.appendingPathComponent("downloads-\(id.uuidString).json") }
 
@@ -178,7 +183,8 @@ final class Downloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
         var r = URLRequest(url: url)
         r.setValue("VLC/3.0.20 LibVLC/3.0.20", forHTTPHeaderField: "User-Agent")
         let t = session.downloadTask(with: r)
-        t.taskDescription = it.id
+        runToken = UUID().uuidString
+        t.taskDescription = runToken + "|" + it.id
         task = t
         t.resume()
         save()
@@ -199,11 +205,12 @@ final class Downloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
             name = safe(it.name)
         }
         if name.isEmpty { name = it.streamId }
+        while name.utf8.count > 200 { name.removeLast() } // file names are limited to 255 bytes, not characters
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var u = dir.appendingPathComponent(String(name.prefix(180)) + "." + ext)
+        var u = dir.appendingPathComponent(name + "." + ext)
         var n = 2
         while FileManager.default.fileExists(atPath: u.path) {
-            u = dir.appendingPathComponent(String(name.prefix(180)) + " (\(n))." + ext)
+            u = dir.appendingPathComponent(name + " (\(n))." + ext)
             n += 1
         }
         return u
@@ -220,10 +227,10 @@ final class Downloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         // The file is deleted when this returns, so move it somewhere safe first
         let staged = FileManager.default.temporaryDirectory.appendingPathComponent("ymdl-" + UUID().uuidString)
-        let ok = (try? FileManager.default.moveItem(at: location, to: staged)) != nil
         let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 200
+        let ok = status < 400 && (try? FileManager.default.moveItem(at: location, to: staged)) != nil
         let id = downloadTask.taskDescription
-        Task { @MainActor in self.finished(id, ok && status < 400 ? staged : nil, status) }
+        Task { @MainActor in self.finished(id, ok ? staged : nil, status) }
     }
 
     nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -233,11 +240,21 @@ final class Downloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
         Task { @MainActor in self.failed(id, cancelled ? nil : error.localizedDescription) }
     }
 
-    private func progress(_ id: String?, _ done: Int64, _ total: Int64) {
-        guard let id = id, id == runningId, let i = entries.firstIndex(where: { $0.id == id }) else { return }
+    /// "token|itemId" → the item id, if it's the download running now (not a cancelled one).
+    private func current(_ desc: String?) -> String? {
+        guard let d = desc, let bar = d.firstIndex(of: "|"), String(d[..<bar]) == runToken else { return nil }
+        let id = String(d[d.index(after: bar)...])
+        return id == runningId ? id : nil
+    }
+
+    private func progress(_ desc: String?, _ done: Int64, _ total: Int64) {
+        guard let id = current(desc), let i = entries.firstIndex(where: { $0.id == id }) else { return }
+        let now = Date()
+        // At most a few updates a second: every redraw costs, and chunks arrive hundreds of times a second
+        if now.timeIntervalSince(lastPublish) < 0.5 && (total <= 0 || done < total) { return }
+        lastPublish = now
         entries[i].done = done
         if total > 0 { entries[i].total = total }
-        let now = Date()
         let dt = now.timeIntervalSince(lastTick)
         if dt >= 1 {
             let s = Double(done - lastBytes) / dt
@@ -247,46 +264,60 @@ final class Downloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
         }
     }
 
-    private func finished(_ id: String?, _ staged: URL?, _ status: Int) {
-        guard let id = id, let i = entries.firstIndex(where: { $0.id == id }) else {
+    private func finished(_ desc: String?, _ staged: URL?, _ status: Int) {
+        guard let id = current(desc), entries.contains(where: { $0.id == id }) else {
             if let s = staged { try? FileManager.default.removeItem(at: s) }
             return
         }
-        if let s = staged {
-            let it = entries[i].item
-            let dest = destination(it, ext: it.ext ?? "mp4")
-            do {
-                try FileManager.default.moveItem(at: s, to: dest)
-                entries[i].state = .done
-                entries[i].file = dest.path
-                if let size = (try? FileManager.default.attributesOfItem(atPath: dest.path))?[.size] as? NSNumber {
-                    entries[i].total = size.int64Value
-                    entries[i].done = size.int64Value
-                }
-            } catch {
+        guard let s = staged, let it = entries.first(where: { $0.id == id })?.item else {
+            if let i = entries.firstIndex(where: { $0.id == id }) {
                 entries[i].state = .failed
-                entries[i].error = "Couldn't save to " + folder.path
+                entries[i].error = status >= 400 ? "The server refused (\(status))" : "Download failed"
             }
-        } else {
-            entries[i].state = .failed
-            entries[i].error = status >= 400 ? "The server refused (\(status))" : "Download failed"
+            done(id)
+            return
         }
+        let dest = destination(it, ext: it.ext ?? "mp4")
+        let folderPath = folder.path
+        // Off the main thread: to another drive a "move" is a copy of several GB
+        Task.detached(priority: .utility) {
+            var ok = true
+            do { try FileManager.default.moveItem(at: s, to: dest) } catch {
+                ok = false
+                try? FileManager.default.removeItem(at: s)
+            }
+            let size = ((try? FileManager.default.attributesOfItem(atPath: dest.path))?[.size] as? NSNumber)?.int64Value
+            await MainActor.run {
+                if let i = self.entries.firstIndex(where: { $0.id == id }) {
+                    if ok {
+                        self.entries[i].state = .done
+                        self.entries[i].file = dest.path
+                        if let size = size { self.entries[i].total = size; self.entries[i].done = size }
+                    } else {
+                        self.entries[i].state = .failed
+                        self.entries[i].error = "Couldn't save to " + folderPath
+                    }
+                }
+                self.done(id)
+            }
+        }
+    }
+
+    /// The running download is over (one way or another): on to the next.
+    private func done(_ id: String) {
         if runningId == id { runningId = nil; task = nil }
         speed = 0
         save()
         pump()
     }
 
-    private func failed(_ id: String?, _ message: String?) {
-        guard let id = id else { return }
+    private func failed(_ desc: String?, _ message: String?) {
+        guard let id = current(desc) else { return } // a cancelled download: already dealt with
         if let i = entries.firstIndex(where: { $0.id == id }), let m = message {
             entries[i].state = .failed
             entries[i].error = m
         }
-        if runningId == id { runningId = nil; task = nil }
-        speed = 0
-        save()
-        pump()
+        done(id)
     }
 }
 
@@ -403,9 +434,7 @@ struct DownloadButton: View {
             switch e?.state {
             case .some(.done): Label("Downloaded", systemImage: "checkmark.circle.fill")
             case .some(.running):
-                Label(dl.speed > 1000 && (e?.total ?? 0) > 0
-                      ? "\(Int((e?.fraction ?? 0) * 100))%  ·  " + Downloader.timeText(Double((e?.total ?? 0) - (e?.done ?? 0)) / dl.speed)
-                      : "Downloading \(Int((e?.fraction ?? 0) * 100))%", systemImage: "stop.circle")
+                Label(runningText(e), systemImage: "stop.circle")
             case .some(.waiting): Label("Waiting to Download", systemImage: "clock")
             case .some(.failed): Label("Retry Download", systemImage: "exclamationmark.arrow.circlepath")
             case .none: Label("Download", systemImage: "arrow.down.circle")
@@ -413,5 +442,15 @@ struct DownloadButton: View {
         }
         .disabled(e?.state == .done)
         .help(e?.state == .running || e?.state == .waiting ? "Click to cancel" : "Save to your Mac to watch without streaming")
+    }
+
+    private func runningText(_ e: Downloader.Entry?) -> String {
+        guard let e = e else { return "Downloading" }
+        let pct: Int = Int(e.fraction * 100)
+        if dl.speed > 1000 && e.total > 0 {
+            let left: Double = Double(e.total - e.done) / dl.speed
+            return "\(pct)%  ·  " + Downloader.timeText(left)
+        }
+        return "Downloading \(pct)%"
     }
 }

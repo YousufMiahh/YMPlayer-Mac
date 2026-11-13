@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 enum Page: String, Hashable, CaseIterable, Identifiable {
     case home, live, movies, series, search, downloads, settings
@@ -69,6 +70,8 @@ final class AppStore: ObservableObject {
     let downloads = Downloader()
 
     private var saveTask: Task<Void, Never>?
+    private var bag = Set<AnyCancellable>()
+    private var endRetries = 0
     private var toastTask: Task<Void, Never>?
     private var progressTimer: Timer?
     private var visibleCache: [Kind: (Int, [Item])] = [:]
@@ -88,6 +91,10 @@ final class AppStore: ObservableObject {
         }
         if current != nil { startup() }
         checkWhatsNew()
+        // Here rather than on the player screen, so the next episode also follows in the mini player
+        player.$ended.removeDuplicates().filter { $0 }.sink { [weak self] _ in
+            Task { @MainActor in self?.playbackEnded() }
+        }.store(in: &bag)
     }
 
     // MARK: what's new
@@ -156,9 +163,11 @@ final class AppStore: ObservableObject {
     func removeAccount(_ id: UUID) {
         accounts.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: userDataURL(id))
+        downloads.forget(id)
         if currentId == id {
             if let first = accounts.first { switchTo(first.id) } else {
                 closePlayer()
+                downloads.setAccount(nil)
                 currentId = nil
                 categories = [:]
                 items = [:]
@@ -379,7 +388,7 @@ final class AppStore: ObservableObject {
     }
 
     func hideCategory(_ k: Kind, _ c: Category) {
-        setHidden(k, c, true)
+        setHidden(k, categories[k]?.first(where: { $0.id == c.id }) ?? c, true) // the provider's name, not your rename
         show("Hidden: \(c.name)  —  bring it back in Settings → Hidden Categories")
     }
 
@@ -450,6 +459,10 @@ final class AppStore: ObservableObject {
         for it in list {
             if w { data.watched.insert(it.id); data.progress[it.id] = nil } else { data.watched.remove(it.id) }
         }
+        if w {
+            let ids = Set(list.map(\.id))
+            data.queue.removeAll { ids.contains($0.id) }
+        }
     }
 
     func watchedCount(_ list: [Item]) -> Int { list.filter { data.watched.contains($0.id) }.count }
@@ -483,7 +496,8 @@ final class AppStore: ObservableObject {
 
     func playNext() {
         guard let s = session, let nx = upNext else { return }
-        setWatched(s.item, true)
+        // Watched only if you got near the end (play() saves where you were otherwise)
+        if player.duration > 60, player.time / player.duration >= 0.9 || player.duration - player.time < 60 { setWatched(s.item, true) }
         if s.item.kind == .episode, s.list.contains(where: { $0.id == nx.id }) {
             play(nx, list: s.list, from: 0)
         } else {
@@ -517,6 +531,7 @@ final class AppStore: ObservableObject {
         preview.stop()
         var at = start ?? 0
         if start == nil, it.kind != .live, let p = data.progress[it.id], p.position > 30, p.fraction < 0.95 { at = p.position }
+        if session?.item.id != it.id { endRetries = 0 }
         session = PlaySession(item: it, list: list.isEmpty ? [it] : list)
         if it.kind == .live { addRecent(it) } else {
             data.recentVOD.removeAll { $0.id == it.id }
@@ -554,6 +569,7 @@ final class AppStore: ObservableObject {
             if seen.insert(src.id).inserted { sources.append(src) }
         }
         guard !sources.isEmpty else { recRows = []; return }
+        let account = currentId
         let movies = visibleItems(.movie), series = visibleItems(.series)
         var rows: [RecRow] = []
         var shown = Set<String>()
@@ -571,6 +587,7 @@ final class AppStore: ObservableObject {
             let name = Tmdb.clean(src.name).name
             if keep.count >= 3 { rows.append(RecRow(title: "Because you watched " + (name.isEmpty ? src.name : name), items: keep)) }
         }
+        guard account == currentId else { return } // switched account meanwhile
         recRows = rows
     }
 
@@ -609,10 +626,22 @@ final class AppStore: ObservableObject {
 
     func playbackEnded() {
         guard let s = session else { return }
-        if upNext != nil { playNext() } else {
-            setWatched(s.item, true)
-            closePlayer()
+        // Stopped well before the end: the connection dropped, it didn't finish. Pick up where it stopped.
+        let t = player.time, d = player.duration
+        if s.item.kind != .live, d > 60, t > 0, t < d * 0.9, d - t > 60 {
+            if endRetries < 3 {
+                endRetries += 1
+                show("Reconnecting…")
+                play(s.item, list: s.list, from: t)
+            } else {
+                saveCurrentProgress()
+                show("The stream stopped — your place is saved")
+                closePlayer()
+            }
+            return
         }
+        setWatched(s.item, true)
+        if upNext != nil { playNext() } else { closePlayer() }
     }
 
     func enterMini() {

@@ -112,7 +112,6 @@ struct PlayerScreen: View {
             removeKeys()
             hideTask?.cancel()
         }
-        .onChange(of: player.ended) { e in if e { store.playbackEnded() } }
         .onChange(of: store.session?.item.id) { _ in
             if let it = item, it.kind == .live { epg.request(it) }
             nextHidden = false
@@ -149,7 +148,7 @@ struct PlayerScreen: View {
     /// When the Next card shows: as the end credits start (if known), else 30 seconds before the end.
     private var cardAt: Double {
         let d = player.duration
-        if let c = store.segments?.creditsStart, c > 0, c < d - 5 { return c }
+        if let c = store.segments?.creditsStart, c > d * 0.7, c < d - 5 { return c } // earlier = a bad match
         return d - 30
     }
 

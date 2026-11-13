@@ -292,12 +292,20 @@ struct DownloadLine: View {
             let done = states.filter { $0 == .done }.count
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                Text("\(season == 0 ? "Specials" : "Season \(season)"): \(done) of \(episodes.count) downloaded"
-                     + (dl.timeLeft(episodes).map { "  ·  " + Downloader.timeText($0) } ?? ""))
+                Text(lineText(done))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+extension DownloadLine {
+    fileprivate func lineText(_ done: Int) -> String {
+        let name: String = season == 0 ? "Specials" : "Season \(season)"
+        var s: String = name + ": \(done) of \(episodes.count) downloaded"
+        if let t = dl.timeLeft(episodes) { s += "  ·  " + Downloader.timeText(t) }
+        return s
     }
 }
 

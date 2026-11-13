@@ -18,23 +18,31 @@ enum Tmdb {
         return (try JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:]
     }
 
-    /// "EN - Breaking Bad (2008) [4K]" → ("Breaking Bad", "2008").
-    static func clean(_ raw: String) -> (name: String, year: String?) {
-        var n = raw
+    /// "EN - Breaking Bad (2008) [4K]" → ("Breaking Bad", "2008"). Only a provider's tag comes off the
+    /// front ("EN - ", "UK: ", "NF | "), never part of a title ("CSI: Miami", "24: Legacy"); a title
+    /// that is a year ("1917") stays. `full` keeps an unbracketed trailing number ("Blade Runner 2049").
+    static func clean(_ raw: String) -> (name: String, year: String?, full: String) {
+        var n = raw.trimmingCharacters(in: .whitespaces)
+        n = n.replacingOccurrences(of: "^[^|]{1,8}\\|\\s*", with: "", options: .regularExpression)
+        n = n.replacingOccurrences(of: "^(?:[A-Z]{2}|(?i:ENG|AMZ|DSNP|ATVP|VOD|MULTI|4K|UHD|FHD|HD))\\s*[:\\-]\\s+", with: "", options: .regularExpression)
         var year: String?
         if let r = n.range(of: "[(\\[]((19|20)\\d{2})[)\\]]", options: .regularExpression) {
             year = String(n[r]).trimmingCharacters(in: CharacterSet(charactersIn: "()[]"))
-        } else if let r = n.range(of: "\\b(19|20)\\d{2}\\s*$", options: .regularExpression) {
-            year = String(n[r]).trimmingCharacters(in: .whitespaces)
+        } else if let r = n.range(of: "\\S\\s+(19|20)\\d{2}\\s*$", options: .regularExpression) {
+            year = String(String(n[r]).dropFirst()).trimmingCharacters(in: .whitespaces)
         }
-        n = n.replacingOccurrences(of: "^\\s*(?:[A-Za-z0-9]{2,4})\\s*[|:\\-]\\s+", with: "", options: .regularExpression)
         n = n.replacingOccurrences(of: "\\(.*?\\)|\\[.*?\\]", with: " ", options: .regularExpression)
-        n = n.replacingOccurrences(of: "\\s+[-:]?\\s*S\\d{1,2}\\s*E\\d{1,3}.*$", with: "", options: [.regularExpression, .caseInsensitive])
-        n = n.replacingOccurrences(of: "\\b(4k|uhd|fhd|hd|sd|multi|sub|dub)\\b.*$", with: "", options: [.regularExpression, .caseInsensitive])
-        if let y = year { n = n.replacingOccurrences(of: "\\s*\(y)\\s*$", with: "", options: .regularExpression) }
+        n = n.replacingOccurrences(of: "\\s+[-:]?\\s*S\\d{1,2}\\s*E\\d{1,3}\\b.*$", with: "", options: [.regularExpression, .caseInsensitive])
+        n = n.replacingOccurrences(of: "\\s+(?:4K|UHD|FHD|HD|SD|MULTI|SUB|DUB|HEVC|H265)\\b.*$", with: "", options: .regularExpression)
         n = n.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
-        return (n, year)
+        let full = n
+        if let y = year { n = n.replacingOccurrences(of: "\\s*\(y)\\s*$", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces) }
+        if n.isEmpty { n = full.isEmpty ? raw.trimmingCharacters(in: .whitespaces) : full; year = nil }
+        return (n, year, full)
     }
+
+    /// Safe in a query value: "Fast & Furious" must not split the URL.
+    static let queryAllowed: CharacterSet = { var c = CharacterSet.urlQueryAllowed; c.remove(charactersIn: "&+=?#"); return c }()
 
     private static var idCache: [String: String] = [:]
 
@@ -45,10 +53,14 @@ enum Tmdb {
         guard !c.name.isEmpty else { return nil }
         let ck = "\(kind.rawValue):\(c.name.lowercased()):\(c.year ?? "")"
         if let hit = await MainActor.run(body: { idCache[ck] }) { return hit.isEmpty ? nil : hit }
-        let q = c.name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? c.name
+        let q = c.name.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? c.name
         var path = "/search/\(kind.rawValue)?query=\(q)"
         if let y = c.year { path += (kind == .tv ? "&first_air_date_year=" : "&year=") + y }
         guard var results = (try? await get(path))?["results"] as? [[String: Any]] else { return nil }
+        if results.isEmpty, c.year != nil, c.full != c.name { // the number is part of the title ("Blade Runner 2049")
+            let fq = c.full.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? c.full
+            results = ((try? await get("/search/\(kind.rawValue)?query=\(fq)"))?["results"] as? [[String: Any]]) ?? []
+        }
         if results.isEmpty, c.year != nil {
             results = ((try? await get("/search/\(kind.rawValue)?query=\(q)"))?["results"] as? [[String: Any]]) ?? []
         }
