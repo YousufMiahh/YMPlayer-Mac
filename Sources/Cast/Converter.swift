@@ -99,6 +99,16 @@ final class Converter {
 
     var isRunning: Bool { process?.isRunning == true }
 
+    /// How many seconds are converted so far (from the playlist).
+    var convertedSeconds: Double {
+        guard let s = try? String(contentsOf: folder.appendingPathComponent("index.m3u8"), encoding: .utf8) else { return 0 }
+        var total = 0.0
+        for line in s.split(separator: "\n") where line.hasPrefix("#EXTINF:") {
+            total += Double(line.dropFirst(8).split(separator: ",").first ?? "") ?? 0
+        }
+        return total
+    }
+
     func stop() {
         if let p = process, p.isRunning { p.terminate() }
         process = nil

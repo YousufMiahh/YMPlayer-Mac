@@ -6,7 +6,7 @@ import AVKit
 /// player pauses while the TV plays; when you stop, it carries on here from where the TV got to.
 @MainActor
 final class CastController: NSObject, ObservableObject {
-    enum Mode: Equatable { case none, airplay }
+    enum Mode: Equatable { case none, airplay, chromecast }
 
     @Published private(set) var mode: Mode = .none
     @Published private(set) var preparing = false
@@ -14,8 +14,11 @@ final class CastController: NSObject, ObservableObject {
     @Published private(set) var duration: Double = 0
     @Published private(set) var playing = false
     @Published private(set) var message: String?
+    @Published private(set) var deviceName = ""
 
     weak var store: AppStore?
+    let browser = CastBrowser()
+    private var chromecast: ChromecastSession?
 
     /// The player AirPlay sends to the TV (never shown on the Mac).
     let avPlayer: AVPlayer = {
@@ -112,6 +115,96 @@ final class CastController: NSObject, ObservableObject {
         }
     }
 
+    // MARK: Chromecast
+
+    /// Play what's on now on this Chromecast / Google TV.
+    func startChromecast(_ d: CastDevice) {
+        guard let store = store, let s = store.session, let api = store.api else { return }
+        if mode != .none { stop(resumeHere: false) }
+        teardown()
+        let it = s.item
+        item = it
+        live = it.kind == .live
+        let at = live ? 0 : store.player.time
+        duration = live ? 0 : store.player.duration
+        time = at
+        deviceName = d.name
+        message = nil
+        mode = .chromecast
+        if store.player.playing { store.player.togglePause() }
+        let session = ChromecastSession(device: d)
+        chromecast = session
+        session.onStatus = { [weak self] st in self?.chromecastStatus(st) }
+        session.onClosed = { [weak self, weak session] err in
+            guard let self = self, let session = session, self.chromecast === session else { return }
+            self.chromecast = nil
+            if self.mode == .chromecast {
+                self.stop(resumeHere: true)
+                if let e = err { self.store?.show(e) }
+            }
+        }
+        let ext = (it.ext ?? "mp4").lowercased()
+        // MP4 films the TV can fetch straight from the provider; everything else (live too: the
+        // TV's player needs the Mac's server for those) the Mac converts as it plays
+        if !live && ["mp4", "m4v"].contains(ext), let url = api.playURL(it, liveFormat: "ts") {
+            offset = 0
+            session.load(url: url, contentType: "video/mp4", live: false, at: at, title: titleFor(it), subtitle: subtitleFor(it), image: it.posterURL)
+            return
+        }
+        guard Converter.available, let src = api.playURL(it, liveFormat: "ts") else {
+            message = "This can't be played on a Chromecast from here."
+            return
+        }
+        castConverted(src, from: at, on: session)
+    }
+
+    private func castConverted(_ src: URL, from at: Double, on session: ChromecastSession) {
+        converter?.stop()
+        let c = Converter(startAt: at)
+        converter = c
+        offset = live ? 0 : at
+        preparing = true
+        guard let base = LocalServer.shared.publish(c.folder), let it = item else {
+            preparing = false
+            message = "Couldn't share the video on your network. Check the Mac is on Wi-Fi."
+            return
+        }
+        let isLive = live
+        Task.detached(priority: .userInitiated) {
+            let ok = c.start(input: src, userAgent: XtreamAPI.userAgent, live: isLive)
+            for _ in 0..<160 { // wait for the first pieces, so the TV doesn't give up
+                if c.isReady || !c.isRunning { break }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            await MainActor.run {
+                guard self.converter === c else { return }
+                self.preparing = false
+                if !ok || !c.isReady {
+                    self.message = "Couldn't get this ready for the TV."
+                    return
+                }
+                session.load(url: base.appendingPathComponent("index.m3u8"), contentType: "application/x-mpegURL", live: isLive,
+                             at: 0, title: self.titleFor(it), subtitle: self.subtitleFor(it), image: it.posterURL)
+            }
+        }
+    }
+
+    private func chromecastStatus(_ st: ChromecastSession.Status) {
+        guard mode == .chromecast else { return }
+        if st.time.isFinite && (st.state == "PLAYING" || st.state == "PAUSED") { time = offset + st.time }
+        if duration <= 0 && st.duration > 0 { duration = st.duration }
+        playing = st.state == "PLAYING" || st.state == "BUFFERING"
+        if st.state == "IDLE" && st.idleReason == "FINISHED" && !live && duration > 60 && time >= duration - 30 {
+            store?.castFinished()
+        }
+    }
+
+    private func titleFor(_ it: Item) -> String { it.kind == .episode ? (it.seriesName ?? it.name) : it.name }
+
+    private func subtitleFor(_ it: Item) -> String? {
+        it.kind == .episode ? [it.episodeLabel, it.name == it.seriesName ? nil : it.name].compactMap { $0 }.joined(separator: "  ·  ") : nil
+    }
+
     func pickerDidClose() {
         pickerOpen = false
         // Nothing chosen: let go of what we prepared (a moment later, in case the TV is still connecting)
@@ -136,6 +229,11 @@ final class CastController: NSObject, ObservableObject {
     // MARK: controls
 
     func togglePause() {
+        if mode == .chromecast {
+            if playing { chromecast?.pause() } else { chromecast?.play() }
+            playing.toggle()
+            return
+        }
         if avPlayer.rate > 0 { avPlayer.pause() } else { avPlayer.play() }
     }
 
@@ -143,6 +241,15 @@ final class CastController: NSObject, ObservableObject {
         guard !live else { return }
         let target = max(0, duration > 0 ? min(t, duration - 5) : t)
         time = target
+        if mode == .chromecast, let session = chromecast {
+            if let c = converter, let store = store, let it = item, let api = store.api, let src = api.playURL(it, liveFormat: "ts") {
+                let local = target - offset
+                if local >= 0 && local <= c.convertedSeconds { session.seek(local) } else { castConverted(src, from: target, on: session) }
+            } else {
+                session.seek(target)
+            }
+            return
+        }
         if let c = converter, let store = store, let it = item, let api = store.api, let src = api.playURL(it, liveFormat: "ts") {
             // Within what's converted already: just jump; further on: convert from there
             let local = target - offset
@@ -168,6 +275,9 @@ final class CastController: NSObject, ObservableObject {
         let was = mode
         mode = .none
         avPlayer.pause()
+        if was == .airplay { avPlayer.replaceCurrentItem(with: nil) }
+        if let c = chromecast { chromecast = nil; c.stop() }
+        deviceName = ""
         teardown()
         guard was != .none, let store = store else { return }
         if resumeHere, store.session != nil {
@@ -238,10 +348,12 @@ struct CastingView: View {
     let subtitle: String?
     @State private var scrub: Double?
 
+    private var tvName: String { cast.deviceName.isEmpty ? "your TV" : cast.deviceName }
+
     var body: some View {
         VStack(spacing: 18) {
-            Image(systemName: "airplayvideo").font(.system(size: 54, weight: .light)).foregroundStyle(Theme.accent)
-            Text(cast.preparing ? "Getting it ready for your TV…" : "Playing on your TV").font(.system(size: 22, weight: .bold))
+            Image(systemName: cast.mode == .chromecast ? "tv" : "airplayvideo").font(.system(size: 54, weight: .light)).foregroundStyle(Theme.accent)
+            Text(cast.preparing ? "Getting it ready for " + tvName + "…" : "Playing on " + tvName).font(.system(size: 22, weight: .bold))
             VStack(spacing: 4) {
                 Text(title).font(.system(size: 16, weight: .semibold)).lineLimit(1)
                 if let s = subtitle, !s.isEmpty { Text(s).font(.system(size: 13)).foregroundStyle(.white.opacity(0.7)).lineLimit(1) }
@@ -277,5 +389,36 @@ struct CastingView: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
+    }
+}
+
+/// The Cast button: Chromecasts and Google TVs on your network.
+struct CastMenu: View {
+    @ObservedObject var cast: CastController
+    @ObservedObject var browser: CastBrowser
+
+    var body: some View {
+        Menu {
+            if browser.devices.isEmpty {
+                Text(browser.searching ? "Looking for Chromecasts and Google TVs…" : "No Chromecasts found")
+            } else {
+                Section("Watch on") {
+                    ForEach(browser.devices) { d in
+                        Button { cast.startChromecast(d) } label: {
+                            if cast.mode == .chromecast && cast.deviceName == d.name { Label(d.name, systemImage: "checkmark") } else { Text(d.name) }
+                        }
+                    }
+                }
+            }
+            if cast.mode == .chromecast {
+                Divider()
+                Button("Stop Watching on TV") { cast.stop(resumeHere: true) }
+            }
+        } label: { Image(systemName: "tv") }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Watch on a Chromecast or Google TV")
+        .onAppear { browser.start() }
     }
 }

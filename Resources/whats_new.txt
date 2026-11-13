@@ -9,3 +9,4 @@
 - A quick tour for new users, and Settings → Show Tutorial to see it again.
 - Fixed: signing in to providers with an http:// address failed with an "App Transport Security" error.
 - AirPlay: watch on your Apple TV or AirPlay TV with the new AirPlay button in the player. Any film or episode works: the Mac converts it for the TV as it plays, so keep the Mac awake and YM Player open while you watch.
+- Chromecast: watch on a Chromecast or Google TV with the new TV button in the player. It works for every film, episode and channel the same way, so keep the Mac awake and YM Player open while you watch.

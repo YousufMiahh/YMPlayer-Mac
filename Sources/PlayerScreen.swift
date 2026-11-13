@@ -252,6 +252,7 @@ struct PlayerScreen: View {
                     AirPlayButton(cast: cast)
                         .frame(width: 26, height: 26)
                         .help("Watch on Apple TV or an AirPlay TV")
+                    CastMenu(cast: cast, browser: cast.browser)
                     Button { store.enterMini() } label: { Image(systemName: "pip.enter") }.help("Picture in picture (P)")
                     Button { toggleFullScreen() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.help("Full screen (F)")
                 }
