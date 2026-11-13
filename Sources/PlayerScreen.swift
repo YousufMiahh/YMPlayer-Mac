@@ -10,6 +10,8 @@ struct PlayerScreen: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var scrub: Double?
     @State private var monitor: Any?
+    @State private var nextHidden = false   // you closed the Next card for this one
+    @State private var nextFired = false
 
     private var item: Item? { store.session?.item }
     private var live: Bool { item?.kind == .live }
@@ -50,6 +52,42 @@ struct PlayerScreen: View {
             if controls || (!player.playing && !player.buffering) {
                 overlay.transition(.opacity)
             }
+            if showSkip {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button(action: skipIntro) {
+                            Text("Skip Intro")
+                                .font(.system(size: 16, weight: .bold))
+                                .padding(.horizontal, 22).padding(.vertical, 12)
+                                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.white.opacity(0.85), lineWidth: 1.5))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .help("Skip Intro (S)")
+                    }
+                }
+                .padding(.trailing, 34)
+                .padding(.bottom, controls ? 130 : 44)
+                .transition(.opacity)
+            }
+            if let nx = store.upNext, showNext {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        NextCard(item: nx, label: nx.kind == .episode && store.session?.list.contains(where: { $0.id == nx.id }) == true ? "Next Episode" : "Next in Queue",
+                                 fill: nextFill,
+                                 play: { nextFired = true; store.playNext() },
+                                 close: { nextHidden = true })
+                    }
+                }
+                .padding(.trailing, 34)
+                .padding(.bottom, controls ? 130 : 44)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
             if let t = store.toast {
                 VStack {
                     Text(t)
@@ -77,9 +115,50 @@ struct PlayerScreen: View {
         .onChange(of: player.ended) { e in if e { store.playbackEnded() } }
         .onChange(of: store.session?.item.id) { _ in
             if let it = item, it.kind == .live { epg.request(it) }
+            nextHidden = false
+            nextFired = false
             poke()
         }
+        .onChange(of: player.time) { _ in
+            // Netflix-style: when the card's timer fills, the next one starts
+            if showNext && nextFill >= 1 && !nextFired && player.playing {
+                nextFired = true
+                store.playNext()
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: showSkip)
+        .animation(.easeOut(duration: 0.3), value: showNext)
     }
+
+    // MARK: Skip Intro / Next card
+
+    private var showSkip: Bool {
+        guard !live, let s = store.segments, s.hasIntro, scrub == nil else { return false }
+        let t = player.time
+        return t >= max(0, s.introStart) && t < s.introEnd - 1
+    }
+
+    private func skipIntro() {
+        guard let s = store.segments, s.hasIntro else { return }
+        player.seek(s.introEnd)
+        poke()
+    }
+
+    private static let countdown: Double = 10
+
+    /// When the Next card shows: as the end credits start (if known), else 30 seconds before the end.
+    private var cardAt: Double {
+        let d = player.duration
+        if let c = store.segments?.creditsStart, c > 0, c < d - 5 { return c }
+        return d - 30
+    }
+
+    private var showNext: Bool {
+        guard !live, !nextHidden, !nextFired, scrub == nil, player.duration > 120, store.upNext != nil else { return false }
+        return player.time >= cardAt && player.time < player.duration - 0.5
+    }
+
+    private var nextFill: Double { min(1, max(0, (player.time - cardAt) / Self.countdown)) }
 
     private var failure: some View {
         VStack(spacing: 12) {
@@ -145,9 +224,11 @@ struct PlayerScreen: View {
                         }
                         .help("Play / pause (Space)")
                         Button { player.jump(10) } label: { Image(systemName: "goforward.10") }.help("Forward 10 seconds (→)")
-                        if store.hasNextEpisode {
-                            Button { store.step(1) } label: { Label("Next Episode", systemImage: "forward.end.fill") }
-                                .font(.system(size: 14, weight: .semibold))
+                        if store.upNext != nil {
+                            Button { nextFired = true; store.playNext() } label: {
+                                Label(store.hasNextEpisode ? "Next Episode" : "Next in Queue", systemImage: "forward.end.fill")
+                            }
+                            .font(.system(size: 14, weight: .semibold))
                         }
                     }
                     Spacer()
@@ -265,6 +346,13 @@ struct PlayerScreen: View {
                 break
             }
             switch e.charactersIgnoringModifiers?.lowercased() {
+            case "s" where showSkip:
+                skipIntro()
+                return nil
+            case "n" where showNext:
+                nextFired = true
+                store.playNext()
+                return nil
             case "f":
                 toggleFullScreen()
                 return nil
@@ -284,5 +372,59 @@ struct PlayerScreen: View {
     private func removeKeys() {
         if let m = monitor { NSEvent.removeMonitor(m) }
         monitor = nil
+    }
+}
+
+/// Netflix-style "Next Episode" card: the button fills up, then the next one plays.
+private struct NextCard: View {
+    let item: Item
+    let label: String
+    let fill: Double
+    let play: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            RemoteImage(url: item.kind == .episode ? (item.iconURL ?? item.posterURL) : item.posterURL, maxPixel: 400)
+                .frame(width: 150, height: 84)
+                .background(Theme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label.uppercased()).font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.7))
+                Text(item.kind == .episode ? (item.episodeLabel.map { $0 + "  ·  " } ?? "") + item.name : item.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(2)
+                    .frame(maxWidth: 230, alignment: .leading)
+                HStack(spacing: 8) {
+                    Button(action: play) {
+                        ZStack(alignment: .leading) {
+                            GeometryReader { g in
+                                Rectangle().fill(.white).frame(width: g.size.width * fill)
+                            }
+                            Label("Play Now", systemImage: "play.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                                .blendMode(.difference)
+                                .padding(.horizontal, 14)
+                        }
+                        .frame(width: 130, height: 32)
+                        .background(.white.opacity(0.25))
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    }
+                    Button(action: close) {
+                        Text("Hide")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(height: 32)
+                            .padding(.horizontal, 12)
+                            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .compositingGroup()
     }
 }

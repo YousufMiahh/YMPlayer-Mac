@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum Page: String, Hashable, CaseIterable, Identifiable {
-    case home, live, movies, series, search, settings
+    case home, live, movies, series, search, downloads, settings
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ enum Page: String, Hashable, CaseIterable, Identifiable {
         case .movies: return "Movies"
         case .series: return "Series"
         case .search: return "Search"
+        case .downloads: return "Downloads"
         case .settings: return "Settings"
         }
     }
@@ -23,6 +24,7 @@ enum Page: String, Hashable, CaseIterable, Identifiable {
         case .movies: return "film"
         case .series: return "play.rectangle.on.rectangle"
         case .search: return "magnifyingglass"
+        case .downloads: return "arrow.down.circle"
         case .settings: return "gearshape"
         }
     }
@@ -58,10 +60,13 @@ final class AppStore: ObservableObject {
     @Published var mini = false
     @Published var accountInfo: String?
     @Published var toast: String?
+    @Published var recRows: [RecRow] = []
+    @Published var segments: Segments?
 
     let player = PlayerModel()
     let preview = PlayerModel()
     let guide = EpgStore()
+    let downloads = Downloader()
 
     private var saveTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
@@ -75,6 +80,8 @@ final class AppStore: ObservableObject {
         if let s = UserDefaults.standard.string(forKey: "currentAccount") { currentId = UUID(uuidString: s) }
         if current == nil { currentId = accounts.first?.id }
         guide.apiProvider = { [weak self] in self?.api }
+        downloads.apiProvider = { [weak self] in self?.api }
+        downloads.setAccount(currentId)
         loadUserData()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.saveCurrentProgress() }
@@ -111,6 +118,8 @@ final class AppStore: ObservableObject {
         top10Series = []
         accountInfo = nil
         guide.reset()
+        recRows = []
+        downloads.setAccount(id)
         loadUserData()
         filtersChanged()
         page = .home
@@ -141,6 +150,8 @@ final class AppStore: ObservableObject {
             async let b: Void = ensureLoaded(.series)
             _ = await (a, b)
             await loadTop10()
+            downloads.pump()
+            await loadRecs()
         }
         Task { await refreshAccountInfo() }
     }
@@ -235,8 +246,21 @@ final class AppStore: ObservableObject {
     }
 
     func visibleCategories(_ k: Kind) -> [Category] {
-        (categories[k] ?? []).filter { !Filters.isHidden($0, k, data) }
+        (categories[k] ?? []).filter { !Filters.isHidden($0, k, data) }.map { c in
+            if let n = data.catNames[Filters.key(k, c)] { return Category(id: c.id, name: n) }
+            return c
+        }
     }
+
+    /// Your own name for a category (empty = back to the provider's).
+    func renameCategory(_ k: Kind, _ c: Category, to name: String) {
+        let key = Filters.key(k, c)
+        let n = name.trimmingCharacters(in: .whitespaces)
+        let original = categories[k]?.first(where: { $0.id == c.id })?.name
+        if n.isEmpty || n == original { data.catNames[key] = nil } else { data.catNames[key] = n }
+    }
+
+    func originalName(_ k: Kind, _ c: Category) -> String { categories[k]?.first(where: { $0.id == c.id })?.name ?? c.name }
 
     /// Everything not in a hidden category.
     func visibleItems(_ k: Kind) -> [Item] {
@@ -268,7 +292,7 @@ final class AppStore: ObservableObject {
         if sel == Special.favourites { return "Favourites" }
         if sel == Special.recent { return "Recently Watched" }
         if sel == Special.all { return "All " + k.title }
-        return categories[k]?.first(where: { $0.id == sel })?.name ?? k.title
+        return visibleCategories(k).first(where: { $0.id == sel })?.name ?? categories[k]?.first(where: { $0.id == sel })?.name ?? k.title
     }
 
     /// For search: categories you hid yourself still turn up, hidden countries / languages don't.
@@ -380,11 +404,71 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: already watched
+
+    func isWatched(_ it: Item) -> Bool { data.watched.contains(it.id) }
+
+    /// Watched: off Continue Watching and out of the Queue.
+    func setWatched(_ it: Item, _ w: Bool) {
+        if w {
+            data.watched.insert(it.id)
+            data.progress[it.id] = nil
+            data.queue.removeAll { $0.id == it.id }
+        } else {
+            data.watched.remove(it.id)
+        }
+    }
+
+    func setWatched(_ list: [Item], _ w: Bool) {
+        for it in list {
+            if w { data.watched.insert(it.id); data.progress[it.id] = nil } else { data.watched.remove(it.id) }
+        }
+    }
+
+    func watchedCount(_ list: [Item]) -> Int { list.filter { data.watched.contains($0.id) }.count }
+
+    // MARK: queue
+
+    func inQueue(_ it: Item) -> Bool { data.queue.contains { $0.id == it.id } }
+
+    func toggleQueue(_ it: Item) {
+        if inQueue(it) {
+            data.queue.removeAll { $0.id == it.id }
+            show("Removed from your Queue")
+        } else {
+            data.queue.append(it)
+            show("Added to your Queue")
+        }
+    }
+
+    func moveInQueue(_ it: Item, to index: Int) {
+        guard let i = data.queue.firstIndex(where: { $0.id == it.id }) else { return }
+        let x = data.queue.remove(at: i)
+        data.queue.insert(x, at: min(max(0, index), data.queue.count))
+    }
+
+    /// What plays after the current film / episode: the next episode, or else the next in your Queue.
+    var upNext: Item? {
+        guard let s = session, s.item.kind != .live else { return nil }
+        if s.item.kind == .episode, let i = s.list.firstIndex(where: { $0.id == s.item.id }), i + 1 < s.list.count { return s.list[i + 1] }
+        return data.queue.first { $0.id != s.item.id }
+    }
+
+    func playNext() {
+        guard let s = session, let nx = upNext else { return }
+        setWatched(s.item, true)
+        if s.item.kind == .episode, s.list.contains(where: { $0.id == nx.id }) {
+            play(nx, list: s.list, from: 0)
+        } else {
+            play(nx)
+        }
+    }
+
     func saveCurrentProgress() {
         guard let s = session, s.item.kind != .live, player.url != nil, player.duration > 60 else { return }
         let pos = player.time, dur = player.duration
-        if pos / dur > 0.95 {
-            data.progress[s.item.id] = nil
+        if pos / dur >= 0.9 || dur - pos < 60 {
+            if !data.watched.contains(s.item.id) || data.progress[s.item.id] != nil { setWatched(s.item, true) }
         } else if pos > 20 {
             data.progress[s.item.id] = WatchProgress(item: s.item, position: pos, duration: dur, updated: Date())
         }
@@ -400,14 +484,67 @@ final class AppStore: ObservableObject {
     }
 
     func play(_ it: Item, list: [Item] = [], from start: Double? = nil) {
-        guard let api = api, let url = api.playURL(it, liveFormat: liveFormat) else { return }
+        guard let api = api, let streamURL = api.playURL(it, liveFormat: liveFormat) else { return }
+        let url = it.kind == .live ? streamURL : (downloads.localURL(for: it) ?? streamURL) // downloaded: play from the Mac
         saveCurrentProgress()
         preview.stop()
         var at = start ?? 0
         if start == nil, it.kind != .live, let p = data.progress[it.id], p.position > 30, p.fraction < 0.95 { at = p.position }
         session = PlaySession(item: it, list: list.isEmpty ? [it] : list)
-        if it.kind == .live { addRecent(it) }
+        if it.kind == .live { addRecent(it) } else {
+            data.recentVOD.removeAll { $0.id == it.id }
+            data.recentVOD.insert(it, at: 0)
+            if data.recentVOD.count > 40 { data.recentVOD.removeLast(data.recentVOD.count - 40) }
+        }
         player.play(url: url, start: at, live: it.kind == .live)
+        loadSegments(it)
+    }
+
+    /// Episodes: where the intro and credits are (TheIntroDB), for Skip Intro and the Next Episode card.
+    func loadSegments(_ it: Item) {
+        segments = nil
+        guard it.kind == .episode, let season = it.season, let ep = it.episode, let series = it.seriesName else { return }
+        let id = it.id
+        Task {
+            guard let tmdb = await Tmdb.findId(.tv, name: series, known: it.tmdb),
+                  let s = await Segments.fetch(tmdb: tmdb, season: season, episode: ep) else { return }
+            if session?.item.id == id { segments = s }
+        }
+    }
+
+    /// "Because you watched …" rows: TMDB recommendations for what you've watched lately that your provider has.
+    func loadRecs() async {
+        var sources: [Item] = []
+        var seen = Set<String>()
+        for h in data.recentVOD {
+            if sources.count >= 3 { break }
+            let src: Item
+            if h.kind == .episode, let sid = h.seriesId {
+                var s = Item(kind: .series, streamId: sid, name: h.seriesName ?? h.name)
+                s.tmdb = h.tmdb
+                src = s
+            } else { src = h }
+            if seen.insert(src.id).inserted { sources.append(src) }
+        }
+        guard !sources.isEmpty else { recRows = []; return }
+        let movies = visibleItems(.movie), series = visibleItems(.series)
+        var rows: [RecRow] = []
+        var shown = Set<String>()
+        for src in sources {
+            let tv = src.kind == .series
+            guard let id = await Tmdb.findId(tv ? .tv : .movie, name: src.name, known: src.tmdb) else { continue }
+            let titles = await Tmdb.recommendations(tv ? .tv : .movie, id: id)
+            let lib = tv ? series : movies
+            let found = await Task.detached(priority: .utility) { Top10.match(titles, lib) }.value
+            var keep: [Item] = []
+            for it in found where it.id != src.id && !data.watched.contains(it.id) && shown.insert(it.id).inserted {
+                keep.append(it)
+                if keep.count >= 20 { break }
+            }
+            let name = Tmdb.clean(src.name).name
+            if keep.count >= 3 { rows.append(RecRow(title: "Because you watched " + (name.isEmpty ? src.name : name), items: keep)) }
+        }
+        recRows = rows
     }
 
     func startPreview(_ ch: Item) {
@@ -445,8 +582,10 @@ final class AppStore: ObservableObject {
 
     func playbackEnded() {
         guard let s = session else { return }
-        data.progress[s.item.id] = nil
-        if s.item.kind == .episode && hasNextEpisode { step(1) } else { closePlayer() }
+        if upNext != nil { playNext() } else {
+            setWatched(s.item, true)
+            closePlayer()
+        }
     }
 
     func enterMini() {

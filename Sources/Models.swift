@@ -47,6 +47,8 @@ struct Item: Identifiable, Hashable, Codable {
     var season: Int? = nil
     var episode: Int? = nil
     var duration: String? = nil
+    /// The Movie Database id (of the film, or of the series for episodes) when the provider gives one.
+    var tmdb: String? = nil
 
     var id: String { kind.rawValue + ":" + streamId }
 
@@ -103,6 +105,7 @@ struct Account: Codable, Identifiable, Hashable {
 }
 
 struct SeriesInfo {
+    var tmdb: String?
     var name: String?
     var plot: String?
     var genre: String?
@@ -117,6 +120,7 @@ struct SeriesInfo {
 }
 
 struct VodInfo {
+    var tmdb: String?
     var plot: String?
     var genre: String?
     var cast: String?
@@ -147,6 +151,28 @@ struct UserData: Codable {
     var hiddenTags: Set<String> = []        // countries, languages, writing systems
     var progress: [String: WatchProgress] = [:]
     var recentChannels: [Item] = []
+    var watched: Set<String> = []           // item ids you've finished (or marked)
+    var queue: [Item] = []                  // your playback queue, in order
+    var catNames: [String: String] = [:]    // "kind:categoryId" → your own name
+    var recentVOD: [Item] = []              // films and episodes you've played, newest first
+
+    init() {}
+
+    // Older saves don't have every field: missing ones start empty
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        favourites = try c.decodeIfPresent([Item].self, forKey: .favourites) ?? []
+        favCategories = try c.decodeIfPresent(Set<String>.self, forKey: .favCategories) ?? []
+        hiddenCategories = try c.decodeIfPresent(Set<String>.self, forKey: .hiddenCategories) ?? []
+        alwaysShown = try c.decodeIfPresent(Set<String>.self, forKey: .alwaysShown) ?? []
+        hiddenTags = try c.decodeIfPresent(Set<String>.self, forKey: .hiddenTags) ?? []
+        progress = try c.decodeIfPresent([String: WatchProgress].self, forKey: .progress) ?? [:]
+        recentChannels = try c.decodeIfPresent([Item].self, forKey: .recentChannels) ?? []
+        watched = try c.decodeIfPresent(Set<String>.self, forKey: .watched) ?? []
+        queue = try c.decodeIfPresent([Item].self, forKey: .queue) ?? []
+        catNames = try c.decodeIfPresent([String: String].self, forKey: .catNames) ?? [:]
+        recentVOD = try c.decodeIfPresent([Item].self, forKey: .recentVOD) ?? []
+    }
 }
 
 struct PlaySession: Identifiable {

@@ -148,6 +148,7 @@ final class XtreamAPI {
         let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:]
         let info = o["info"] as? [String: Any] ?? [:]
         var si = SeriesInfo()
+        si.tmdb = str(info["tmdb"]) ?? str(info["tmdb_id"]) ?? s.tmdb
         si.name = str(info["name"]) ?? s.name
         si.plot = str(info["plot"]) ?? s.plot
         si.genre = str(info["genre"]) ?? s.genre
@@ -181,6 +182,7 @@ final class XtreamAPI {
             it.seriesId = s.streamId
             it.seriesName = si.name ?? s.name
             it.cover = si.cover ?? s.icon
+            it.tmdb = si.tmdb
             si.seasons[it.season ?? 0, default: []].append(it)
         }
         for k in Array(si.seasons.keys) { si.seasons[k]?.sort { ($0.episode ?? 0) < ($1.episode ?? 0) } }
@@ -192,6 +194,7 @@ final class XtreamAPI {
         let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:]
         let i = o["info"] as? [String: Any] ?? [:]
         var v = VodInfo()
+        v.tmdb = str(i["tmdb_id"]) ?? str(i["tmdb"])
         v.plot = str(i["plot"]) ?? str(i["description"])
         v.genre = str(i["genre"])
         v.cast = str(i["cast"]) ?? str(i["actors"])

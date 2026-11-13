@@ -71,6 +71,7 @@ struct LoginView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject var dl: Downloader
     @AppStorage("liveFormat") private var liveFormat = "ts"
     @AppStorage("previewMode") private var previewMode = 2
     @State private var showAdd = false
@@ -129,15 +130,32 @@ struct SettingsView: View {
                 LabeledContent("Hidden categories") {
                     Button("\(store.hiddenCategoryList().count) hidden") { showHidden = true }
                 }
-                Text("Right-click a category in Live TV, Movies or Series to favourite or hide it. Things in categories you hide yourself still turn up in search.")
+                Text("Right-click a category in Live TV, Movies or Series to favourite, rename or hide it. Things in categories you hide yourself still turn up in search.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Downloads") {
+                LabeledContent("Save downloads to") {
+                    HStack {
+                        Text(dl.folder.path).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Button("Choose…") { chooseFolder() }
+                        if dl.folder != Downloader.defaultFolder {
+                            Button("Default") { dl.folder = Downloader.defaultFolder }
+                        }
+                    }
+                }
             }
 
             Section("Library") {
                 Button("Refresh Channels, Movies & Series") { store.refreshAll() }
                 Button("Clear Continue Watching") { store.data.progress = [:] }
                 Button("Clear Recently Watched Channels") { store.data.recentChannels = [] }
+                Button("Clear Your Queue") { store.data.queue = [] }
+                Button("Clear Watched Marks") { store.data.watched = [] }
+                if !store.data.catNames.isEmpty {
+                    Button("Restore Original Category Names") { store.data.catNames = [:] }
+                }
             }
 
             Section("About") {
@@ -151,6 +169,17 @@ struct SettingsView: View {
         .sheet(isPresented: $showAdd) { LoginView(isSheet: true).environmentObject(store) }
         .sheet(isPresented: $showTags) { TagsSheet().environmentObject(store) }
         .sheet(isPresented: $showHidden) { HiddenSheet().environmentObject(store) }
+    }
+
+    private func chooseFolder() {
+        let p = NSOpenPanel()
+        p.canChooseDirectories = true
+        p.canChooseFiles = false
+        p.canCreateDirectories = true
+        p.allowsMultipleSelection = false
+        p.prompt = "Choose"
+        p.message = "Choose where YM Player saves downloads"
+        if p.runModal() == .OK, let u = p.url { dl.folder = u }
     }
 }
 

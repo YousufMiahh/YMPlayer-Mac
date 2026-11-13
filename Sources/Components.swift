@@ -54,6 +54,9 @@ struct PosterCard: View {
                 .overlay(alignment: .bottom) {
                     if let p = progress { ProgressLine(value: p).padding(8) }
                 }
+                .overlay(alignment: .topTrailing) {
+                    if store.isWatched(item) { WatchedBadge().padding(7) }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(hover ? Theme.accent : Color.clear, lineWidth: 3))
                 .shadow(color: .black.opacity(hover ? 0.45 : 0.2), radius: hover ? 10 : 4, y: 3)
@@ -80,9 +83,25 @@ struct PosterCard: View {
             if item.kind != .episode {
                 Button(store.isFavourite(item) ? "Remove from Favourites" : "Add to Favourites") { store.toggleFavourite(item) }
             }
+            if item.kind == .movie || item.kind == .episode {
+                Button(store.inQueue(item) ? "Remove from Queue" : "Add to Queue") { store.toggleQueue(item) }
+                Button(store.isWatched(item) ? "Mark as Unwatched" : "Mark as Watched") { store.setWatched(item, !store.isWatched(item)) }
+            }
             if let m = extraMenu { m() }
         }
         .help(item.name)
+    }
+}
+
+/// The ✓ in the corner of something you've watched.
+struct WatchedBadge: View {
+    var body: some View {
+        Image(systemName: "checkmark")
+            .font(.system(size: 11, weight: .heavy))
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(Circle().fill(Theme.accent))
+            .shadow(color: .black.opacity(0.5), radius: 3)
     }
 }
 
@@ -217,6 +236,7 @@ struct CategoryColumn: View {
     @EnvironmentObject var store: AppStore
     let kind: Kind
     @Binding var selection: String?
+    @State private var renaming: Category?
 
     private struct Entry: Identifiable {
         let id: String
@@ -259,6 +279,7 @@ struct CategoryColumn: View {
                     Button(store.isFavCategory(kind, c) ? "Remove from Favourite Categories" : "Add to Favourite Categories") {
                         store.toggleFavCategory(kind, c)
                     }
+                    Button("Rename…") { renaming = c }
                     Button("Hide This Category") {
                         if selection == c.id { selection = Special.all }
                         store.hideCategory(kind, c)
@@ -266,7 +287,7 @@ struct CategoryColumn: View {
                 }
             }
             Divider()
-            Text("Right-click a category to favourite or hide it")
+            Text("Right-click a category to favourite, rename or hide it")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -274,5 +295,43 @@ struct CategoryColumn: View {
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity)
         }
+        .sheet(item: $renaming) { c in RenameSheet(kind: kind, category: c).environmentObject(store) }
+    }
+}
+
+/// Give a category your own name (blank or "Original Name" puts the provider's back).
+struct RenameSheet: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    let kind: Kind
+    let category: Category
+    @State private var name = ""
+
+    var body: some View {
+        let original = store.originalName(kind, category)
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Rename Category").font(.title3.bold())
+            Text("Original name: " + original).font(.callout).foregroundStyle(.secondary)
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 340)
+                .onSubmit(save)
+            HStack {
+                Button("Original Name") {
+                    store.renameCategory(kind, category, to: "")
+                    dismiss()
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save", action: save).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .onAppear { name = category.name }
+    }
+
+    private func save() {
+        store.renameCategory(kind, category, to: name)
+        dismiss()
     }
 }

@@ -14,6 +14,7 @@ struct HomeView: View {
         let recentCh = store.data.recentChannels
         let newMovies = recentlyAdded(.movie)
         let newSeries = recentlyAdded(.series)
+        let queue = store.data.queue
         let nothingYet = store.items[.movie] == nil && store.items[.series] == nil && store.items[.live] == nil
 
         ScrollView {
@@ -42,6 +43,22 @@ struct HomeView: View {
                     }
                 }
 
+                if !queue.isEmpty {
+                    Shelf(title: "Your Queue", subtitle: "plays next, in order") {
+                        ForEach(queue) { it in
+                            PosterCard(item: it, width: 150,
+                                       title: it.displayTitle,
+                                       subtitle: it.episodeLabel.map { $0 + "  ·  " + it.name } ?? it.rating,
+                                       progress: store.data.progress[it.id]?.fraction,
+                                       action: { store.play(it) },
+                                       extraMenu: { AnyView(Group {
+                                           Button("Move to Front") { store.moveInQueue(it, to: 0) }
+                                           Button("Move to End") { store.moveInQueue(it, to: Int.max) }
+                                       }) })
+                        }
+                    }
+                }
+
                 if !favChannels.isEmpty {
                     Shelf(title: "Favourite Channels") {
                         ForEach(favChannels) { ch in ChannelCard(item: ch) { store.play(ch, list: favChannels) } }
@@ -66,6 +83,14 @@ struct HomeView: View {
                     Shelf(title: "Top 10 Series in the UK This Week", subtitle: "from Netflix") {
                         ForEach(Array(store.top10Series.enumerated()), id: \.element.id) { i, it in
                             RankedCard(rank: i + 1, item: it) { store.open(it) }
+                        }
+                    }
+                }
+
+                ForEach(store.recRows) { row in
+                    Shelf(title: row.title) {
+                        ForEach(row.items) { it in
+                            PosterCard(item: it, width: 150, subtitle: it.kind == .series ? (it.genre ?? "Series") : it.rating) { store.open(it) }
                         }
                     }
                 }

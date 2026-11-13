@@ -98,6 +98,15 @@ struct MovieDetail: View {
                         }
                     }
                     .controlSize(.large)
+                    HStack(spacing: 10) {
+                        Button { store.toggleQueue(item) } label: {
+                            Label(store.inQueue(item) ? "In Queue" : "Add to Queue", systemImage: store.inQueue(item) ? "checkmark" : "plus")
+                        }
+                        Button { store.setWatched(item, !store.isWatched(item)) } label: {
+                            Label(store.isWatched(item) ? "Watched" : "Mark as Watched", systemImage: store.isWatched(item) ? "checkmark.circle.fill" : "circle")
+                        }
+                        DownloadButton(dl: store.downloads, item: item)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -110,12 +119,15 @@ struct MovieDetail: View {
 
     private func go(_ from: Double?) {
         dismiss()
-        store.play(item, from: from)
+        var it = item
+        if it.tmdb == nil { it.tmdb = info?.tmdb }
+        store.play(it, from: from)
     }
 }
 
 struct SeriesDetail: View {
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject var dl: Downloader
     @Environment(\.dismiss) private var dismiss
     let item: Item
     @State private var info: SeriesInfo?
@@ -173,20 +185,60 @@ struct SeriesDetail: View {
                 if seasons.isEmpty {
                     EmptyState(icon: "play.rectangle", title: "No episodes yet")
                 } else {
-                    HStack {
+                    let eps = info.seasons[season] ?? []
+                    HStack(spacing: 14) {
                         Picker("Season", selection: $season) {
-                            ForEach(seasons, id: \.self) { s in Text(s == 0 ? "Specials" : "Season \(s)").tag(s) }
+                            ForEach(seasons, id: \.self) { s in Text(seasonLabel(s, info.seasons[s] ?? [])).tag(s) }
                         }
-                        .frame(width: 200)
+                        .frame(width: 230)
+                        Menu {
+                            Button(store.watchedCount(eps) == eps.count ? "Mark Season as Unwatched" : "Mark Season as Watched") {
+                                store.setWatched(eps, store.watchedCount(eps) != eps.count)
+                            }
+                            Divider()
+                            Button("Download " + (season == 0 ? "Specials" : "Season \(season)")) { store.downloads.add(eps) }
+                            if seasons.count > 1 {
+                                Button("Download All Seasons") { store.downloads.add(info.allEpisodes) }
+                            }
+                            if eps.contains(where: { e in let s = store.downloads.entry(e)?.state; return s == .waiting || s == .running }) {
+                                Button("Cancel This Season's Downloads") { store.downloads.cancelAll(eps) }
+                            }
+                        } label: { Label("Season", systemImage: "ellipsis.circle") }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
                         Spacer()
-                        Text("\(info.seasons[season]?.count ?? 0) episodes").foregroundStyle(.secondary)
+                        DownloadLine(dl: store.downloads, season: season, episodes: eps)
+                        Text("\(eps.count) episodes").foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 30)
                     .padding(.vertical, 12)
                     ScrollView {
                         LazyVStack(spacing: 8) {
-                            ForEach(info.seasons[season] ?? []) { ep in
-                                EpisodeRow(episode: ep, progress: store.data.progress[ep.id]) { play(ep) }
+                            ForEach(eps) { ep in
+                                EpisodeRow(episode: ep, progress: store.data.progress[ep.id], watched: store.isWatched(ep),
+                                           downloaded: store.downloads.entry(ep)?.state == .done) { play(ep) }
+                                    .contextMenu {
+                                        Button("Play") { play(ep) }
+                                        Button(store.isWatched(ep) ? "Mark as Unwatched" : "Mark as Watched") { store.setWatched(ep, !store.isWatched(ep)) }
+                                        Button(store.watchedCount(eps) == eps.count ? "Mark Season as Unwatched" : "Mark Season as Watched") {
+                                            store.setWatched(eps, store.watchedCount(eps) != eps.count)
+                                        }
+                                        Button(store.inQueue(ep) ? "Remove from Queue" : "Add to Queue") { store.toggleQueue(ep) }
+                                        Divider()
+                                        if let e = store.downloads.entry(ep) {
+                                            if e.state == .done {
+                                                Button("Show in Finder") { store.downloads.reveal(e) }
+                                                Button("Delete Download") { store.downloads.delete(e) }
+                                            } else {
+                                                Button("Cancel Download") { store.downloads.cancel(e) }
+                                            }
+                                        } else {
+                                            Button("Download Episode") { store.downloads.add([ep]) }
+                                        }
+                                        if store.data.progress[ep.id] != nil {
+                                            Button("Remove from Continue Watching") { store.data.progress[ep.id] = nil }
+                                        }
+                                    }
                             }
                         }
                         .padding(.horizontal, 24)
@@ -213,6 +265,13 @@ struct SeriesDetail: View {
         }
     }
 
+    private func seasonLabel(_ s: Int, _ eps: [Item]) -> String {
+        let name = s == 0 ? "Specials" : "Season \(s)"
+        let w = store.watchedCount(eps)
+        if w == 0 || eps.isEmpty { return name }
+        return w == eps.count ? name + "  ✓" : name + "  \(w)/\(eps.count)"
+    }
+
     private func play(_ ep: Item) {
         let list = info?.allEpisodes ?? [ep]
         dismiss()
@@ -220,9 +279,33 @@ struct SeriesDetail: View {
     }
 }
 
+/// "Season 2: 3 of 10 downloaded · about 40 min left"
+struct DownloadLine: View {
+    @ObservedObject var dl: Downloader
+    let season: Int
+    let episodes: [Item]
+
+    var body: some View {
+        let states = episodes.compactMap { dl.entry($0)?.state }
+        let busy = states.contains(.waiting) || states.contains(.running)
+        if busy {
+            let done = states.filter { $0 == .done }.count
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("\(season == 0 ? "Specials" : "Season \(season)"): \(done) of \(episodes.count) downloaded"
+                     + (dl.timeLeft(episodes).map { "  ·  " + Downloader.timeText($0) } ?? ""))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 struct EpisodeRow: View {
     let episode: Item
     let progress: WatchProgress?
+    var watched = false
+    var downloaded = false
     let action: () -> Void
     @State private var hover = false
 
@@ -237,12 +320,16 @@ struct EpisodeRow: View {
             .overlay(alignment: .bottom) {
                 if let p = progress { ProgressLine(value: p.fraction).padding(6) }
             }
+            .overlay(alignment: .topTrailing) {
+                if watched { WatchedBadge().padding(6) }
+            }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 5) {
                 Text((episode.episode.map { "\($0).  " } ?? "") + episode.name)
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(2)
-                if let d = episode.duration { Text(d).font(.caption).foregroundStyle(.secondary) }
+                let sub = [episode.duration, watched ? "✓ Watched" : nil, downloaded ? "Downloaded" : nil].compactMap { $0 }
+                if !sub.isEmpty { Text(sub.joined(separator: "  ·  ")).font(.caption).foregroundStyle(.secondary) }
                 if let p = episode.plot { Text(p).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(3) }
             }
             Spacer()

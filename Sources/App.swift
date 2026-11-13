@@ -18,6 +18,7 @@ struct YMPlayerApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(store.guide)
+                .environmentObject(store.downloads)
                 .frame(minWidth: 1100, minHeight: 680)
         }
         .defaultSize(width: 1440, height: 900)
@@ -80,6 +81,7 @@ struct RootView: View {
                     case .movies: VODView(kind: .movie).id("movies")
                     case .series: VODView(kind: .series).id("series")
                     case .search: SearchView()
+                    case .downloads: DownloadsView(dl: store.downloads)
                     case .settings: SettingsView()
                     }
                 }
@@ -105,6 +107,7 @@ struct RootView: View {
             DetailSheet(item: it)
                 .environmentObject(store)
                 .environmentObject(epg)
+                .environmentObject(store.downloads)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
