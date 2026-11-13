@@ -124,7 +124,7 @@ struct RootView: View {
             .toolbar(playing ? .hidden : .visible, for: .windowToolbar)
 
             if playing {
-                PlayerScreen(player: store.player)
+                PlayerScreen(player: store.player, cast: store.cast)
                     .environment(\.colorScheme, .dark) // video: always dark, whatever the app's mode
                     .zIndex(1)
             }

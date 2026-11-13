@@ -6,6 +6,7 @@ struct PlayerScreen: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var epg: EpgStore
     @ObservedObject var player: PlayerModel
+    @ObservedObject var cast: CastController
     @State private var controls = true
     @State private var hideTask: Task<Void, Never>?
     @State private var scrub: Double?
@@ -92,6 +93,10 @@ struct PlayerScreen: View {
                 .padding(.trailing, 34)
                 .padding(.bottom, controls ? 130 : 44)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+            if cast.isCasting {
+                CastingView(cast: cast, title: title, subtitle: subtitle)
+                    .transition(.opacity)
             }
             if let t = store.toast {
                 VStack {
@@ -244,6 +249,9 @@ struct PlayerScreen: View {
                         .help("Mute (M)")
                         Slider(value: $player.volume, in: 0...200).frame(width: 110).controlSize(.small)
                     }
+                    AirPlayButton(cast: cast)
+                        .frame(width: 26, height: 26)
+                        .help("Watch on Apple TV or an AirPlay TV")
                     Button { store.enterMini() } label: { Image(systemName: "pip.enter") }.help("Picture in picture (P)")
                     Button { toggleFullScreen() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.help("Full screen (F)")
                 }
@@ -332,6 +340,16 @@ struct PlayerScreen: View {
         removeKeys()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
             guard store.session != nil, !store.mini else { return e }
+            if cast.isCasting { // playing on the TV: the keys control the TV
+                if NSApp.keyWindow?.firstResponder is NSText || e.modifierFlags.contains(.command) { return e }
+                switch e.keyCode {
+                case 49: cast.togglePause(); return nil
+                case 123: cast.jump(-10); return nil
+                case 124: cast.jump(10); return nil
+                case 53: cast.stop(resumeHere: true); return nil
+                default: return e
+                }
+            }
             if e.window is NSPanel { return e }
             if NSApp.keyWindow?.firstResponder is NSText { return e } // typing somewhere
             if e.modifierFlags.contains(.command) { return e }

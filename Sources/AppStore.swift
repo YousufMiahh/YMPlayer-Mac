@@ -75,6 +75,7 @@ final class AppStore: ObservableObject {
     let preview = PlayerModel()
     let guide = EpgStore()
     let downloads = Downloader()
+    let cast = CastController()
 
     private var saveTask: Task<Void, Never>?
     private var bag = Set<AnyCancellable>()
@@ -91,6 +92,7 @@ final class AppStore: ObservableObject {
         if current == nil { currentId = accounts.first?.id }
         guide.apiProvider = { [weak self] in self?.api }
         downloads.apiProvider = { [weak self] in self?.api }
+        cast.store = self
         downloads.setAccount(currentId)
         loadUserData()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -535,7 +537,9 @@ final class AppStore: ObservableObject {
 
     func saveCurrentProgress() {
         guard let s = session, s.item.kind != .live, player.url != nil, player.duration > 60 else { return }
-        let pos = player.time, dur = player.duration
+        // On the TV: where the TV has got to
+        let pos = cast.isCasting ? cast.time : player.time
+        let dur = cast.isCasting && cast.duration > 0 ? cast.duration : player.duration
         if pos / dur >= 0.9 || dur - pos < 60 {
             if !data.watched.contains(s.item.id) || data.progress[s.item.id] != nil { finished(s) }
         } else if pos > 20 {
@@ -556,6 +560,7 @@ final class AppStore: ObservableObject {
         guard let api = api, let streamURL = api.playURL(it, liveFormat: liveFormat) else { return }
         let url = it.kind == .live ? streamURL : (downloads.localURL(for: it) ?? streamURL) // downloaded: play from the Mac
         saveCurrentProgress()
+        if cast.isCasting { cast.stop(resumeHere: false) } // something else chosen: back on the Mac
         preview.stop()
         var at = start ?? 0
         if start == nil, it.kind != .live, let p = data.progress[it.id], p.position > 30, p.fraction < 0.95 { at = p.position }
@@ -664,8 +669,17 @@ final class AppStore: ObservableObject {
         preview.play(url: url, live: true)
     }
 
+    /// The TV reached the end: watched, and the player closes.
+    func castFinished() {
+        guard let s = session else { return }
+        cast.stop(resumeHere: false)
+        finished(s)
+        closePlayer()
+    }
+
     func closePlayer() {
         saveCurrentProgress()
+        if cast.isCasting { cast.stop(resumeHere: false) }
         player.stop()
         session = nil
         if mini {

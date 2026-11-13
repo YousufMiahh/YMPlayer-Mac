@@ -39,6 +39,22 @@ jobs:
           msg="${msg//'%'/'%25'}"; msg="${msg//$'\n'/'%0A'}"; msg="${msg//$'\r'/'%0D'}"
           echo "::error title=Build failed::$msg"
 
+      # FFmpeg inside the app: converts films for AirPlay / Chromecast (static builds, Apple silicon + Intel)
+      - name: FFmpeg
+        run: |
+          APP="build/Build/Products/Release/YM Player.app"
+          base=https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0
+          if curl -fsSL -o ff-arm64.gz $base/ffmpeg-darwin-arm64.gz && curl -fsSL -o ff-x64.gz $base/ffmpeg-darwin-x64.gz; then
+            gunzip -f ff-arm64.gz ff-x64.gz
+            lipo -create ff-arm64 ff-x64 -output ffmpeg || cp ff-arm64 ffmpeg
+            chmod +x ffmpeg
+            cp ffmpeg "$APP/Contents/MacOS/ffmpeg"
+            "$APP/Contents/MacOS/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -E " (h264_videotoolbox|libx264|aac) " || true
+            ls -la "$APP/Contents/MacOS"
+          else
+            echo "::warning title=FFmpeg::Couldn't download FFmpeg: AirPlay will only work for MP4 films and live channels"
+          fi
+
       - name: Package
         run: |
           APP="build/Build/Products/Release/YM Player.app"
