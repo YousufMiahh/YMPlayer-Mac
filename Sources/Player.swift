@@ -46,7 +46,9 @@ struct Track: Identifiable, Hashable {
 /// streams Xtream providers send, with all audio and subtitle tracks.
 @MainActor
 final class PlayerModel: ObservableObject {
-    let vlc = VLCMediaPlayer()
+    /// Recreated when the subtitle style changes (VLC only reads it when it starts up).
+    private(set) var vlc: VLCMediaPlayer
+    private var vlcStyle: [String]
     let video = VideoHostView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
 
     @Published var time: Double = 0
@@ -70,20 +72,70 @@ final class PlayerModel: ObservableObject {
     private var lastRetry = Date.distantPast
 
     init() {
+        vlcStyle = SubtitleStyle.vlcOptions
+        vlc = VLCMediaPlayer(options: vlcStyle)
         vlc.drawable = video
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        video.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: video, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.applyPicture() } // window resized: Fill / Stretch follow the new shape
+        }
+    }
+
+    // MARK: picture shape
+
+    private(set) var picture: PictureMode = .fit
+    private var aspectBuf: UnsafeMutablePointer<CChar>?
+    private var cropBuf: UnsafeMutablePointer<CChar>?
+
+    func setPicture(_ m: PictureMode) {
+        picture = m
+        applyPicture()
+        objectWillChange.send()
+    }
+
+    private func applyPicture() {
+        let s = video.bounds.size
+        let w = max(1, Int(s.width.rounded())), h = max(1, Int(s.height.rounded()))
+        var aspect: String?, crop: String?
+        switch picture {
+        case .fit: break
+        case .fill: crop = "\(w):\(h)"          // crop the video to the window's shape, then fit it
+        case .stretch: aspect = "\(w):\(h)"     // pretend the video is the window's shape
+        case .wide: aspect = "16:9"
+        case .classic: aspect = "4:3"
+        }
+        let oldA = aspectBuf, oldC = cropBuf
+        aspectBuf = aspect.flatMap { strdup($0) }
+        cropBuf = crop.flatMap { strdup($0) }
+        vlc.videoAspectRatio = aspectBuf
+        vlc.videoCropGeometry = cropBuf
+        if let o = oldA { free(o) }
+        if let o = oldC { free(o) }
     }
 
     func play(url: URL, start: Double = 0, live: Bool) {
         self.url = url
         isLive = live
         retries = 0
+        recoveries = 0
         open(url, start: start)
     }
 
     private func open(_ url: URL, start: Double) {
+        // Subtitle look changed in Settings: a fresh VLC with the new style, from this video on
+        let style = SubtitleStyle.vlcOptions
+        if style != vlcStyle {
+            vlc.stop()
+            vlc.drawable = nil
+            vlcStyle = style
+            vlc = VLCMediaPlayer(options: style)
+            vlc.drawable = video
+        }
+        frozenSince = nil
+        lastPictures = -1
         let m = VLCMedia(url: url)
         m.addOption(":http-user-agent=\(XtreamAPI.userAgent)")
         m.addOption(":network-caching=\(isLive ? 2000 : 4000)")
@@ -97,6 +149,7 @@ final class PlayerModel: ObservableObject {
         duration = 0
         vlc.play()
         applyVolume()
+        applyPicture()
     }
 
     func retry() {
@@ -156,6 +209,35 @@ final class PlayerModel: ObservableObject {
         let e = st == .ended && !isLive
         if e != ended { ended = e }
         if p { retries = 0 }
+        checkFrozen(playing: p, buffering: b)
+    }
+
+    // MARK: frozen picture
+
+    /// Settings → Fix Frozen Video: playing, but no new frames for a few seconds → reconnect.
+    static var fixFrozen: Bool { UserDefaults.standard.object(forKey: "fixFrozen") as? Bool ?? true }
+    private var lastPictures = -1
+    private var frozenSince: Date?
+    private var recoveries = 0
+
+    private func checkFrozen(playing: Bool, buffering: Bool) {
+        guard PlayerModel.fixFrozen, playing, !buffering, vlc.hasVideoOut, let m = vlc.media else {
+            frozenSince = nil
+            return
+        }
+        let shown = Int(m.numberOfDisplayedPictures)
+        if shown != lastPictures {
+            lastPictures = shown
+            frozenSince = nil
+            return
+        }
+        if frozenSince == nil { frozenSince = Date(); return }
+        if let f = frozenSince, Date().timeIntervalSince(f) > 4, recoveries < 3 {
+            recoveries += 1
+            frozenSince = nil
+            lastPictures = -1
+            retry() // live: from now; films: from where it froze
+        }
     }
 
     // MARK: tracks
@@ -212,7 +294,8 @@ final class MiniWindow: NSObject, NSWindowDelegate {
             p.isReleasedWhenClosed = false
             p.backgroundColor = .black
             p.delegate = self
-            p.contentView = NSHostingView(rootView: MiniPlayerView(player: store.player).environmentObject(store))
+            p.contentView = NSHostingView(rootView: MiniPlayerView(player: store.player).environmentObject(store)
+                .environment(\.colorScheme, .dark))
             if let s = NSScreen.main?.visibleFrame {
                 p.setFrameOrigin(NSPoint(x: s.maxX - 500, y: s.minY + 24))
             }

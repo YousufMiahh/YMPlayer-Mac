@@ -45,6 +45,11 @@ struct PlayerScreen: View {
                     if !live { player.togglePause() }
                     poke()
                 }
+                // Trackpad pinch: out to fill the screen, in to see the whole picture
+                .simultaneousGesture(MagnificationGesture().onEnded { v in
+                    if v > 1.15 && player.picture != .fill { store.setPicture(.fill) }
+                    else if v < 0.87 && player.picture != .fit { store.setPicture(.fit) }
+                })
             if player.buffering && !player.failed {
                 ProgressView().controlSize(.large)
             }
@@ -269,6 +274,19 @@ struct PlayerScreen: View {
                 .fixedSize()
                 .help("Audio language")
             }
+            Menu {
+                Section("Remembered for " + (item?.kind == .episode ? "this series" : live ? "this channel" : "this film")) {
+                    ForEach(PictureMode.allCases) { m in
+                        Button { store.setPicture(m) } label: {
+                            if m == player.picture { Label(m.title, systemImage: "checkmark") } else { Text(m.title) }
+                        }
+                    }
+                }
+            } label: { Image(systemName: "aspectratio") }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Picture: fit, fill, stretch, 16:9 or 4:3 (or pinch the trackpad)")
             Menu {
                 ForEach(player.subtitleTracks) { t in
                     Button { player.setSubtitle(t.id) } label: {

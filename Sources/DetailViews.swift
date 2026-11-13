@@ -46,6 +46,7 @@ struct MovieDetail: View {
     @Environment(\.dismiss) private var dismiss
     let item: Item
     @State private var info: VodInfo?
+    @State private var trailer: String?
 
     private var meta: String {
         var parts: [String] = []
@@ -93,8 +94,8 @@ struct MovieDetail: View {
                         Button { store.toggleFavourite(item) } label: {
                             Label(store.isFavourite(item) ? "Favourite" : "Add to Favourites", systemImage: store.isFavourite(item) ? "heart.fill" : "heart")
                         }
-                        if let t = info?.trailer, !t.isEmpty, let u = URL(string: "https://www.youtube.com/watch?v=\(t)") {
-                            Button { NSWorkspace.shared.open(u) } label: { Label("Trailer", systemImage: "film") }
+                        if let id = TrailerSheet.youtubeId(info?.trailer) {
+                            Button { trailer = id } label: { Label("Trailer", systemImage: "film") }
                         }
                     }
                     .controlSize(.large)
@@ -115,6 +116,9 @@ struct MovieDetail: View {
         }
         .frame(width: 940, height: 580)
         .task { info = try? await store.api?.vodInfo(item) }
+        .sheet(item: Binding(get: { trailer.map { TrailerID(id: $0) } }, set: { trailer = $0?.id })) { t in
+            TrailerSheet(videoId: t.id, title: item.name)
+        }
     }
 
     private func go(_ from: Double?) {
@@ -133,6 +137,7 @@ struct SeriesDetail: View {
     @State private var info: SeriesInfo?
     @State private var failed = false
     @State private var season = 0
+    @State private var trailer: String?
 
     private var lastWatched: WatchProgress? {
         store.data.progress.values.filter { $0.item.seriesId == item.streamId }.max { $0.updated < $1.updated }
@@ -168,6 +173,9 @@ struct SeriesDetail: View {
                             }
                             Button { store.toggleFavourite(item) } label: {
                                 Label(store.isFavourite(item) ? "Favourite" : "Add to Favourites", systemImage: store.isFavourite(item) ? "heart.fill" : "heart")
+                            }
+                            if let id = TrailerSheet.youtubeId(info?.trailer) {
+                                Button { trailer = id } label: { Label("Trailer", systemImage: "film") }
                             }
                         }
                         .controlSize(.large)
@@ -256,6 +264,9 @@ struct SeriesDetail: View {
         }
         .frame(width: 940, height: 680)
         .background(Theme.bg)
+        .sheet(item: Binding(get: { trailer.map { TrailerID(id: $0) } }, set: { trailer = $0?.id })) { t in
+            TrailerSheet(videoId: t.id, title: item.name)
+        }
         .task {
             do {
                 let i = try await store.api?.seriesInfo(item)
@@ -356,3 +367,5 @@ struct EpisodeRow: View {
         .onTapGesture(perform: action)
     }
 }
+
+struct TrailerID: Identifiable { let id: String }

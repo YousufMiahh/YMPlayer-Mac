@@ -74,6 +74,14 @@ struct SettingsView: View {
     @EnvironmentObject var dl: Downloader
     @AppStorage("liveFormat") private var liveFormat = "ts"
     @AppStorage("previewMode") private var previewMode = 2
+    @AppStorage("appearance") private var appearance = 0
+    @AppStorage("homeRowsVersion") private var homeRowsVersion = 0
+    @AppStorage("subSize") private var subSize = 1
+    @AppStorage("subColour") private var subColour = 0
+    @AppStorage("subBackground") private var subBackground = false
+    @AppStorage("subOpacity") private var subOpacity = 2
+    @AppStorage("fixFrozen") private var fixFrozen = true
+    @AppStorage("userAgent") private var userAgent = ""
     @State private var showAdd = false
     @State private var showTags = false
     @State private var showHidden = false
@@ -108,6 +116,52 @@ struct SettingsView: View {
                 Button("Add Account…") { showAdd = true }
             }
 
+            Section("Appearance") {
+                Picker("Theme", selection: $appearance) {
+                    Text("Match my Mac").tag(0)
+                    Text("Light").tag(1)
+                    Text("Dark").tag(2)
+                }
+                .onChange(of: appearance) { Theme.applyAppearance($0) }
+            }
+
+            Section("Home Screen") {
+                ForEach(HomeRows.all) { r in
+                    Toggle(r.name, isOn: Binding(get: { HomeRows.shows(r.key) }, set: {
+                        UserDefaults.standard.set($0, forKey: "home." + r.key)
+                        homeRowsVersion += 1
+                    }))
+                }
+            }
+
+            Section("Subtitles") {
+                Picker("Size", selection: $subSize) {
+                    ForEach(0..<SubtitleStyle.sizes.count, id: \.self) { Text(SubtitleStyle.sizes[$0]).tag($0) }
+                }
+                Picker("Colour", selection: $subColour) {
+                    ForEach(0..<SubtitleStyle.colourNames.count, id: \.self) { Text(SubtitleStyle.colourNames[$0]).tag($0) }
+                }
+                Toggle("Background behind the text", isOn: $subBackground)
+                Picker("Background opacity", selection: $subOpacity) {
+                    ForEach(0..<SubtitleStyle.opacityNames.count, id: \.self) { Text(SubtitleStyle.opacityNames[$0]).tag($0) }
+                }
+                .disabled(!subBackground)
+                HStack {
+                    Spacer()
+                    Text("This is how subtitles will look")
+                        .font(.system(size: [15, 18, 22, 27][min(3, max(0, subSize))], weight: .bold))
+                        .foregroundStyle(Color(hex: SubtitleStyle.colours[min(SubtitleStyle.colours.count - 1, max(0, subColour))]))
+                        .shadow(color: subBackground ? .clear : .black, radius: 2)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.black.opacity(subBackground ? Double(SubtitleStyle.opacities[min(3, max(0, subOpacity))]) / 255 : 0))
+                    Spacer()
+                }
+                .padding(.vertical, 14)
+                .background(LinearGradient(colors: [Color(hex: 0x3A4A5A), Color(hex: 0x1A2230)], startPoint: .top, endPoint: .bottom),
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Text("Changes apply from the next video you play.").font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Playback") {
                 Picker("Live stream format", selection: $liveFormat) {
                     Text("MPEG-TS (recommended)").tag("ts")
@@ -118,7 +172,25 @@ struct SettingsView: View {
                     Text("Muted").tag(1)
                     Text("With sound").tag(2)
                 }
-                Text("Player keys: Space play/pause · ← → skip 10s · ↑ ↓ change channel (live) or volume · F full screen · P picture in picture · M mute · Esc back")
+                Toggle("Fix frozen video automatically", isOn: $fixFrozen)
+                Text("If the picture freezes while the sound carries on, the stream is reconnected.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Player keys: Space play/pause · ← → skip 10s · ↑ ↓ change channel (live) or volume · F full screen · P picture in picture · M mute · S skip intro · N next episode · Esc back. Pinch the trackpad to fill or fit the picture.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Advanced") {
+                LabeledContent("User agent") {
+                    HStack {
+                        TextField("", text: $userAgent, prompt: Text(XtreamAPI.defaultUserAgent))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 260)
+                        if !userAgent.isEmpty { Button("Default") { userAgent = "" } }
+                    }
+                }
+                Text("Only change this if your provider asks you to. It's the app name YM Player gives your provider; some only let in certain apps. Applies to the next thing you load.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -161,7 +233,9 @@ struct SettingsView: View {
             Section("About") {
                 LabeledContent("Version", value: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")
                                + " (" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1") + ")")
+                Button("Check for Updates") { Updater.shared.check(manual: true) }
                 Button("What's New") { store.showWhatsNew() }
+                Button("Show Tutorial") { store.showTour = true }
                 Text("Developed by Yousuf Miah").foregroundStyle(.secondary)
             }
         }

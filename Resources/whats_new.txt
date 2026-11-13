@@ -1,4 +1,10 @@
-- New look: the same colours as YM Player on TV and phone, with the glowing background that changes colour for each section.
-- Smoother: pages slide in as you move around, categories and seasons glide in, and pictures fade in as they load.
-- Posters lift with a white outline as you point at them, and the Top 10 numbers have the outlined style from the TV app.
+- New look: the same colours as YM Player on TV and phone, with the glowing background that changes colour for each section, and smooth slides and fades as you move around.
+- Light and dark: the app now follows your Mac's light or dark mode. Choose Light or Dark instead in Settings → Appearance.
+- Picture: the new picture button in the player lets you choose Fit, Fill Screen, Stretch, 16:9 or 4:3, remembered for each channel, film and series. Or pinch the trackpad.
+- Trailers now play right here in the app.
+- Subtitles: choose their size, colour and background in Settings.
+- Home Screen: choose which rows show in Settings. When there's nothing to base "Because you watched" on, you get "Recommended for You" instead.
+- Frozen picture: if the picture freezes while the sound carries on, the stream reconnects by itself.
+- Updates: YM Player now updates itself. It tells you when a new version is out and installs it for you.
+- A quick tour for new users, and Settings → Show Tutorial to see it again.
 - Fixed: signing in to providers with an http:// address failed with an "App Transport Security" error.

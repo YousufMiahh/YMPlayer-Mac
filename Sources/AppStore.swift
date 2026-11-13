@@ -143,8 +143,19 @@ final class AppStore: ObservableObject {
     }
 
     func addAccount(_ a: Account) {
+        let first = accounts.isEmpty
         accounts.append(a)
         switchTo(a.id)
+        if first && !UserDefaults.standard.bool(forKey: "tourDone") { showTour = true } // new here: the quick tour
+    }
+
+    // MARK: tutorial
+
+    @Published var showTour = false
+
+    func finishTour() {
+        showTour = false
+        UserDefaults.standard.set(true, forKey: "tourDone")
     }
 
     func switchTo(_ id: UUID) {
@@ -555,6 +566,7 @@ final class AppStore: ObservableObject {
             data.recentVOD.insert(it, at: 0)
             if data.recentVOD.count > 40 { data.recentVOD.removeLast(data.recentVOD.count - 40) }
         }
+        player.setPicture(picture(for: it))
         player.play(url: url, start: at, live: it.kind == .live)
         loadSegments(it)
     }
@@ -604,8 +616,46 @@ final class AppStore: ObservableObject {
             let name = Tmdb.clean(src.name).name
             if keep.count >= 3 { rows.append(RecRow(title: "Because you watched " + (name.isEmpty ? src.name : name), items: keep)) }
         }
+        if rows.isEmpty { // nothing from TMDB: series sharing a genre with what you watch, best rated first
+            let picks = byGenre(sources, series)
+            if picks.count >= 3 { rows.append(RecRow(title: "Recommended for You", items: picks)) }
+        }
         guard account == currentId else { return } // switched account meanwhile
         recRows = rows
+    }
+
+    /// The "Recommended for You" fallback, as on the TV and phone.
+    private func byGenre(_ watched: [Item], _ series: [Item]) -> [Item] {
+        func genres(_ s: String?) -> [String] {
+            (s ?? "").components(separatedBy: CharacterSet(charactersIn: "·,/&"))
+                .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+                .filter { !$0.isEmpty && !$0.hasPrefix("★") && $0.count < 30 }
+        }
+        func rating(_ it: Item) -> Double { Double((it.rating ?? "").replacingOccurrences(of: "★", with: "").trimmingCharacters(in: .whitespaces)) ?? 0 }
+        let byId = Dictionary(series.map { ($0.streamId, $0) }, uniquingKeysWith: { a, _ in a })
+        var want = Set<String>()
+        var seen = Set<String>()
+        for w in watched {
+            seen.insert(w.id)
+            if let full = byId[w.streamId], w.kind == .series { genres(full.genre).forEach { want.insert($0) } }
+        }
+        guard !want.isEmpty else { return [] }
+        let out = series.filter { s in !seen.contains(s.id) && !data.watched.contains(s.id) && genres(s.genre).contains(where: want.contains) }
+        return Array(out.sorted { rating($0) > rating($1) }.prefix(20))
+    }
+
+    // MARK: picture shape
+
+    private func pictureKey(_ it: Item) -> String { it.kind == .episode ? "series:" + (it.seriesId ?? it.id) : it.id }
+
+    func picture(for it: Item) -> PictureMode { PictureMode(rawValue: data.picture[pictureKey(it)] ?? 0) ?? .fit }
+
+    /// Remembered for this channel / film / series.
+    func setPicture(_ m: PictureMode) {
+        guard let it = session?.item else { return }
+        data.picture[pictureKey(it)] = m == .fit ? nil : m.rawValue
+        player.setPicture(m)
+        show("Picture: " + (m == .fill ? "Fill Screen" : m.title))
     }
 
     func startPreview(_ ch: Item) {

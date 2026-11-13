@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
+        Theme.applyAppearance(UserDefaults.standard.integer(forKey: "appearance"))
     }
 }
 
@@ -31,6 +32,8 @@ struct YMPlayerApp: App {
                 }
                 Divider()
                 Button("What's New") { store.showWhatsNew() }
+                Button("Show Tutorial") { store.showTour = true }
+                Button("Check for Updates…") { Updater.shared.check(manual: true) }
                 Button("Refresh Library") { store.refreshAll() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
             }
@@ -50,9 +53,19 @@ struct RootView: View {
                 main
             }
         }
-        .preferredColorScheme(.dark)
-        .sheet(isPresented: Binding(get: { store.whatsNew != nil && store.session == nil }, set: { if !$0 { store.whatsNew = nil } })) {
-            WhatsNewSheet(lines: store.whatsNew ?? []).preferredColorScheme(.dark)
+        .sheet(isPresented: Binding(get: { store.whatsNew != nil && store.session == nil && !store.showTour },
+                                    set: { if !$0 { store.whatsNew = nil } })) {
+            WhatsNewSheet(lines: store.whatsNew ?? [])
+        }
+        .sheet(isPresented: Binding(get: { store.showTour && store.current != nil && store.session == nil },
+                                    set: { if !$0 { store.finishTour() } })) {
+            TourSheet().environmentObject(store)
+        }
+        .overlay(alignment: .bottom) { UpdateBanner(updater: Updater.shared) }
+        .task {
+            // New version on GitHub? Once things have settled (not over the What's New or the tour)
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if store.whatsNew == nil && !store.showTour && store.session == nil { Updater.shared.check(manual: false) }
         }
         .tint(Theme.accent)
         .background(WindowFinder())
@@ -112,6 +125,7 @@ struct RootView: View {
 
             if playing {
                 PlayerScreen(player: store.player)
+                    .environment(\.colorScheme, .dark) // video: always dark, whatever the app's mode
                     .zIndex(1)
             }
         }
@@ -120,7 +134,6 @@ struct RootView: View {
                 .environmentObject(store)
                 .environmentObject(epg)
                 .environmentObject(store.downloads)
-                .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
     }

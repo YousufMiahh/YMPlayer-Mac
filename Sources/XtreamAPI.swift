@@ -15,7 +15,12 @@ enum APIError: LocalizedError {
 
 /// Xtream Codes "player_api.php" client.
 final class XtreamAPI {
-    static let userAgent = "XtreamPlayer/1.0 (Macintosh; Mac OS X)"
+    static let defaultUserAgent = "XtreamPlayer/1.0 (Macintosh; Mac OS X)"
+    /// Settings → User Agent: some providers only let in certain app names.
+    static var userAgent: String {
+        let s = (UserDefaults.standard.string(forKey: "userAgent") ?? "").trimmingCharacters(in: .whitespaces)
+        return s.isEmpty ? defaultUserAgent : s
+    }
 
     static let session: URLSession = {
         let c = URLSessionConfiguration.default
@@ -153,6 +158,7 @@ final class XtreamAPI {
         si.plot = str(info["plot"]) ?? s.plot
         si.genre = str(info["genre"]) ?? s.genre
         si.cast = str(info["cast"])
+        si.trailer = str(info["youtube_trailer"]) ?? str(info["trailer"])
         si.releaseDate = str(info["releaseDate"]) ?? str(info["release_date"])
         si.rating = ratingText(info["rating"]) ?? s.rating
         si.cover = str(info["cover"]) ?? s.icon

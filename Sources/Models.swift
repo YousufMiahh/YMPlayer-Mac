@@ -110,6 +110,7 @@ struct SeriesInfo {
     var plot: String?
     var genre: String?
     var cast: String?
+    var trailer: String?
     var releaseDate: String?
     var rating: String?
     var cover: String?
@@ -155,6 +156,7 @@ struct UserData: Codable {
     var queue: [Item] = []                  // your playback queue, in order
     var catNames: [String: String] = [:]    // "kind:categoryId" → your own name
     var recentVOD: [Item] = []              // films and episodes you've played, newest first
+    var picture: [String: Int] = [:]        // picture shape per channel / film / series (see PictureMode)
 
     init() {}
 
@@ -172,6 +174,7 @@ struct UserData: Codable {
         queue = try c.decodeIfPresent([Item].self, forKey: .queue) ?? []
         catNames = try c.decodeIfPresent([String: String].self, forKey: .catNames) ?? [:]
         recentVOD = try c.decodeIfPresent([Item].self, forKey: .recentVOD) ?? []
+        picture = try c.decodeIfPresent([String: Int].self, forKey: .picture) ?? [:]
     }
 }
 
@@ -226,4 +229,45 @@ func ratingText(_ v: Any?) -> String? {
 func b64(_ s: String) -> String {
     guard let d = Data(base64Encoded: s, options: .ignoreUnknownCharacters), let t = String(data: d, encoding: .utf8) else { return s }
     return t.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// How the picture fills the screen (the same choices as on the TV and phone).
+enum PictureMode: Int, CaseIterable, Identifiable {
+    case fit, fill, stretch, wide, classic
+    var id: Int { rawValue }
+    var title: String {
+        switch self {
+        case .fit: return "Fit"
+        case .fill: return "Fill Screen (Zoom)"
+        case .stretch: return "Stretch"
+        case .wide: return "16:9"
+        case .classic: return "4:3"
+        }
+    }
+}
+
+/// Subtitle look (Settings → Subtitles), the same choices as the TV and phone apps.
+enum SubtitleStyle {
+    static let sizes = ["Small", "Medium", "Large", "Extra Large"]
+    static let relSizes = [20, 17, 14, 11]                 // VLC: smaller number = bigger text
+    static let colourNames = ["White", "Yellow", "Cyan", "Green", "Pink", "Orange"]
+    static let colours: [UInt32] = [0xFFFFFF, 0xFFE14D, 0x5AE0FF, 0x6BEA7A, 0xFF8AD8, 0xFFA94D]
+    static let opacityNames = ["25%", "50%", "75%", "100%"]
+    static let opacities = [0x40, 0x80, 0xBF, 0xFF]
+
+    static var size: Int { min(3, max(0, UserDefaults.standard.object(forKey: "subSize") as? Int ?? 1)) }
+    static var colour: Int { min(colours.count - 1, max(0, UserDefaults.standard.integer(forKey: "subColour"))) }
+    static var background: Bool { UserDefaults.standard.bool(forKey: "subBackground") }
+    static var opacity: Int { min(3, max(0, UserDefaults.standard.object(forKey: "subOpacity") as? Int ?? 2)) }
+
+    /// libVLC options for the text renderer.
+    static var vlcOptions: [String] {
+        var o = ["--freetype-color=\(colours[colour])", "--freetype-rel-fontsize=\(relSizes[size])", "--freetype-bold"]
+        if background {
+            o += ["--freetype-background-color=0", "--freetype-background-opacity=\(opacities[opacity])", "--freetype-shadow-opacity=0"]
+        } else {
+            o += ["--freetype-background-opacity=0", "--freetype-shadow-opacity=200"]
+        }
+        return o
+    }
 }

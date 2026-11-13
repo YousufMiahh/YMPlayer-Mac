@@ -1,16 +1,32 @@
 import SwiftUI
 
-/// The same look as the TV and phone apps: near-black navy, system blue, soft white surfaces.
+/// The same look as the TV and phone apps, in their dark and light themes: near-black navy (or
+/// soft grey), system blue, see-through surfaces. Each colour follows the app's light / dark mode.
 enum Theme {
     static let accent = Color(hex: 0x0A84FF)            // system blue
     static let pink = Color(hex: 0xFF453A)              // hearts (the apps' red)
-    static let bg = Color(hex: 0x0A0B12)
-    static let card = Color.white.opacity(0.10)         // SURFACE
-    static let cardHi = Color.white.opacity(0.18)       // SURFACE_HI
-    static let text2 = Color(hex: 0xEBEBF5).opacity(0.60)
-    static let text3 = Color(hex: 0xEBEBF5).opacity(0.30)
-    static let focus = Color.white                      // the TV app's focus highlight
+    static let bg = dyn(ns(0x0A0B12), ns(0xF2F2F7))
+    static let card = dyn(.white.withAlphaComponent(0.10), .black.withAlphaComponent(0.07))     // SURFACE
+    static let cardHi = dyn(.white.withAlphaComponent(0.18), .black.withAlphaComponent(0.13))   // SURFACE_HI
+    static let text2 = dyn(ns(0xEBEBF5, 0.60), ns(0x3C3C43, 0.60))
+    static let text3 = dyn(ns(0xEBEBF5, 0.30), ns(0x3C3C43, 0.36))
+    static let focus = dyn(.white, ns(0x1D1D1F))         // the TV app's focus highlight
+    static let onFocus = dyn(ns(0x0B0B0F), .white)
     static let ease = Animation.timingCurve(0.2, 0.9, 0.3, 1, duration: 0.28) // the apps' decelerate curve
+
+    static func ns(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
+        NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
+    }
+
+    /// One colour for dark mode, another for light.
+    static func dyn(_ dark: NSColor, _ light: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { ap in ap.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light })
+    }
+
+    /// Settings → Appearance: 0 = match the Mac, 1 = light, 2 = dark.
+    static func applyAppearance(_ mode: Int) {
+        NSApp.appearance = mode == 1 ? NSAppearance(named: .aqua) : mode == 2 ? NSAppearance(named: .darkAqua) : nil
+    }
 }
 
 extension Color {
@@ -23,6 +39,7 @@ extension Color {
 /// dark, and cross-fading as you move between sections (as on the TV and phone).
 struct AmbientBackground: View {
     let page: Page
+    @Environment(\.colorScheme) private var scheme
 
     static func base(_ p: Page) -> UInt32 {
         switch p {
@@ -36,28 +53,33 @@ struct AmbientBackground: View {
         }
     }
 
-    /// Rich but calm: the same toning as the Android apps.
-    static func tone(_ hex: UInt32) -> NSColor {
-        let c = NSColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    /// Rich but calm (dark), or a pale wash (light): the same toning as the Android apps.
+    static func tone(_ hex: UInt32, dark: Bool) -> NSColor {
+        let c = Theme.ns(hex).usingColorSpace(.sRGB) ?? Theme.ns(hex)
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
         if s < 0.12 { h = 228 / 360; s = 0.30 }
-        s = min(0.85, max(0.35, max(s * 1.25, 0.35)))
-        return NSColor(hue: h, saturation: s, brightness: 0.46, alpha: 1)
+        if dark {
+            s = min(0.85, max(0.35, max(s * 1.25, 0.35)))
+            return NSColor(hue: h, saturation: s, brightness: 0.46, alpha: 1)
+        }
+        s = min(0.32, max(0.10, s * 0.55))
+        return NSColor(hue: h, saturation: s, brightness: 0.97, alpha: 1)
     }
 
-    static func gradient(_ p: Page) -> LinearGradient {
-        let top = tone(base(p))
-        let bg = NSColor(red: 10 / 255, green: 11 / 255, blue: 18 / 255, alpha: 1)
+    static func gradient(_ p: Page, dark: Bool) -> LinearGradient {
+        let top = tone(base(p), dark: dark)
+        let bg = dark ? Theme.ns(0x0A0B12) : Theme.ns(0xF2F2F7)
         func mix(_ t: CGFloat) -> Color { Color(nsColor: top.blended(withFraction: t, of: bg) ?? bg) }
-        return LinearGradient(colors: [Color(nsColor: top), mix(0.45), mix(0.85), Theme.bg], startPoint: .top, endPoint: .bottom)
+        return LinearGradient(colors: [Color(nsColor: top), mix(0.45), mix(0.85), Color(nsColor: bg)], startPoint: .top, endPoint: .bottom)
     }
 
     var body: some View {
+        let dark = scheme == .dark
         ZStack {
             Theme.bg
             ForEach(Page.allCases) { p in
-                AmbientBackground.gradient(p).opacity(p == page ? 1 : 0)
+                AmbientBackground.gradient(p, dark: dark).opacity(p == page ? 1 : 0)
             }
         }
         .animation(.easeInOut(duration: 0.7), value: page)
@@ -153,9 +175,9 @@ struct WatchedBadge: View {
     var body: some View {
         Image(systemName: "checkmark")
             .font(.system(size: 11, weight: .heavy))
-            .foregroundStyle(.black)
+            .foregroundStyle(Theme.onFocus)
             .frame(width: 22, height: 22)
-            .background(Circle().fill(Color.white.opacity(0.95)))
+            .background(Circle().fill(Theme.focus.opacity(0.95)))
             .shadow(color: .black.opacity(0.5), radius: 3)
     }
 }
@@ -396,7 +418,7 @@ struct OutlinedNumber: View {
 
     var body: some View {
         let font = Font.system(size: 120, weight: .black, design: .rounded)
-        let edge = Color(hex: 0xEBEBF5).opacity(0.8)
+        let edge = Theme.dyn(Theme.ns(0xEBEBF5, 0.8), Theme.ns(0x3C3C43, 0.7))
         ZStack {
             ForEach(0..<16, id: \.self) { i in
                 let a = Double(i) / 16 * 2 * .pi
