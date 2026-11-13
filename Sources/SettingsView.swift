@@ -166,6 +166,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden) // the ambient background shows through, as on the apps
         .navigationTitle("Settings")
         .sheet(isPresented: $showAdd) { LoginView(isSheet: true).environmentObject(store) }
         .sheet(isPresented: $showTags) { TagsSheet().environmentObject(store) }

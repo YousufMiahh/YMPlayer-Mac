@@ -78,17 +78,25 @@ struct RootView: View {
                 }
                 .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
             } detail: {
-                Group {
-                    switch store.page {
-                    case .home: HomeView()
-                    case .live: LiveView()
-                    case .movies: VODView(kind: .movie).id("movies")
-                    case .series: VODView(kind: .series).id("series")
-                    case .search: SearchView()
-                    case .downloads: DownloadsView(dl: store.downloads)
-                    case .settings: SettingsView()
+                ZStack {
+                    Group {
+                        switch store.page {
+                        case .home: HomeView()
+                        case .live: LiveView()
+                        case .movies: VODView(kind: .movie)
+                        case .series: VODView(kind: .series)
+                        case .search: SearchView()
+                        case .downloads: DownloadsView(dl: store.downloads)
+                        case .settings: SettingsView()
+                        }
                     }
+                    .id(store.page)
+                    // As on the TV and phone: the new page fades in sliding from the side you moved to
+                    .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 36 * store.pageDir)),
+                                            removal: .opacity.combined(with: .offset(x: -24 * store.pageDir))))
                 }
+                .animation(Theme.ease, value: store.page)
+                .background(AmbientBackground(page: store.page))
                 .overlay(alignment: .bottom) {
                     if let t = store.toast, !playing {
                         Text(t)

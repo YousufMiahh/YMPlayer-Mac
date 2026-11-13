@@ -60,8 +60,11 @@ struct VODView: View {
                         }
                         .padding(24)
                     }
+                    .id((category ?? "") + (results == nil ? "" : "?" + query))
+                    .transition(.opacity.combined(with: .offset(x: 24))) // as on the apps: the new list slides in
                 }
             }
+            .animation(Theme.ease, value: category)
         }
     }
 

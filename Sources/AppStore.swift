@@ -47,7 +47,14 @@ struct TagCount: Hashable {
 final class AppStore: ObservableObject {
     @Published var accounts: [Account] = []
     @Published var currentId: UUID?
-    @Published var page: Page = .home
+    @Published var page: Page = .home {
+        willSet {
+            let a = Page.allCases.firstIndex(of: page) ?? 0, b = Page.allCases.firstIndex(of: newValue) ?? 0
+            if a != b { pageDir = b > a ? 1 : -1 }
+        }
+    }
+    /// Which way the last page change went: new pages slide in from that side.
+    private(set) var pageDir: CGFloat = 1
     @Published var categories: [Kind: [Category]] = [:]
     @Published var items: [Kind: [Item]] = [:]
     @Published var loading: Set<Kind> = []

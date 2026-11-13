@@ -337,6 +337,7 @@ struct DownloadsView: View {
                     ForEach(list) { e in DownloadRow(dl: dl, entry: e) }
                 }
                 .listStyle(.inset)
+                .scrollContentBackground(.hidden)
             }
         }
         .navigationTitle("Downloads")

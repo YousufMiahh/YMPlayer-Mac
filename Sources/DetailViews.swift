@@ -14,12 +14,12 @@ private struct Backdrop: View {
 
     var body: some View {
         ZStack {
-            Color.black
+            Theme.bg
             RemoteImage(url: url, maxPixel: 1400)
                 .blur(radius: blurred ? 40 : 0)
                 .opacity(blurred ? 0.6 : 0.85)
         }
-        .overlay(LinearGradient(colors: [.black.opacity(0.35), .black.opacity(0.85), .black.opacity(0.97)],
+        .overlay(LinearGradient(colors: [Theme.bg.opacity(0.35), Theme.bg.opacity(0.85), Theme.bg.opacity(0.97)],
                                 startPoint: .top, endPoint: .bottom))
         .clipped()
     }
@@ -244,6 +244,9 @@ struct SeriesDetail: View {
                         .padding(.horizontal, 24)
                         .padding(.bottom, 20)
                     }
+                    .id(season)
+                    .transition(.opacity.combined(with: .offset(y: 16))) // as on the apps: a new season's episodes rise in
+                    .animation(Theme.ease, value: season)
                 }
             } else if failed {
                 EmptyState(icon: "wifi.exclamationmark", title: "Couldn't load the episodes")
@@ -252,7 +255,7 @@ struct SeriesDetail: View {
             }
         }
         .frame(width: 940, height: 680)
-        .background(Color.black)
+        .background(Theme.bg)
         .task {
             do {
                 let i = try await store.api?.seriesInfo(item)

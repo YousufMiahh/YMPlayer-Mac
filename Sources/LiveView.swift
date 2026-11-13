@@ -89,6 +89,7 @@ struct LiveView: View {
                     }
                 }
                 .listStyle(.inset)
+                .scrollContentBackground(.hidden)
                 .contextMenu(forSelectionType: String.self) { ids in
                     if let id = ids.first, let ch = list.first(where: { $0.id == id }) {
                         Button("Watch") { play(ch) }

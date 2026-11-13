@@ -86,15 +86,19 @@ struct RemoteImage: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: mode)
+                    .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.3), value: image != nil)
         .task(id: url) {
             guard let url = url else {
                 image = nil
                 return
             }
             if let c = ImageMemory.cache.object(forKey: url as NSURL) {
-                image = c
+                var t = Transaction()
+                t.disablesAnimations = true // already here: no fade
+                withTransaction(t) { image = c }
                 return
             }
             image = nil

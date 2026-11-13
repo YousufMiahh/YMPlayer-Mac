@@ -1,7 +1,4 @@
+- New look: the same colours as YM Player on TV and phone, with the glowing background that changes colour for each section.
+- Smoother: pages slide in as you move around, categories and seasons glide in, and pictures fade in as they load.
+- Posters lift with a white outline as you point at them, and the Top 10 numbers have the outlined style from the TV app.
 - Fixed: signing in to providers with an http:// address failed with an "App Transport Security" error.
-- Continue Watching: when you finish an episode, the next one takes its place, ready to start.
-- Downloads: smoother while downloading, saving a big file no longer freezes the app, and failed downloads don't leave files behind.
-- The next episode now also plays on in the mini player.
-- If a stream drops part-way through, it reconnects and carries on, instead of marking it watched and moving on.
-- Pressing Next Episode early no longer marks the one you were watching as watched.
-- Better matching for Skip Intro and "Because you watched", so titles like "CSI: Miami" or "1917" are found correctly.

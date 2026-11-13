@@ -1,13 +1,68 @@
 import SwiftUI
 
+/// The same look as the TV and phone apps: near-black navy, system blue, soft white surfaces.
 enum Theme {
-    static let accent = Color(red: 0.56, green: 0.38, blue: 1.0)
-    static let pink = Color(red: 0.96, green: 0.40, blue: 0.55)
-    static let card = Color.white.opacity(0.06)
-    static let cardHi = Color.white.opacity(0.13)
-    static let gradient = LinearGradient(colors: [Color(red: 0.36, green: 0.35, blue: 0.98), Color(red: 0.55, green: 0.24, blue: 0.92),
-                                                  Color(red: 0.96, green: 0.40, blue: 0.47)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing)
+    static let accent = Color(hex: 0x0A84FF)            // system blue
+    static let pink = Color(hex: 0xFF453A)              // hearts (the apps' red)
+    static let bg = Color(hex: 0x0A0B12)
+    static let card = Color.white.opacity(0.10)         // SURFACE
+    static let cardHi = Color.white.opacity(0.18)       // SURFACE_HI
+    static let text2 = Color(hex: 0xEBEBF5).opacity(0.60)
+    static let text3 = Color(hex: 0xEBEBF5).opacity(0.30)
+    static let focus = Color.white                      // the TV app's focus highlight
+    static let ease = Animation.timingCurve(0.2, 0.9, 0.3, 1, duration: 0.28) // the apps' decelerate curve
+}
+
+extension Color {
+    init(hex: UInt32) {
+        self.init(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
+    }
+}
+
+/// The apps' ambient background: a soft glow of each section's colour at the top, fading into the
+/// dark, and cross-fading as you move between sections (as on the TV and phone).
+struct AmbientBackground: View {
+    let page: Page
+
+    static func base(_ p: Page) -> UInt32 {
+        switch p {
+        case .home: return 0x2A2F7A
+        case .live: return 0x0F5C66
+        case .movies: return 0x6A1F4A
+        case .series: return 0x1F4E8C
+        case .search: return 0x4A2A80
+        case .downloads: return 0x1F5C7A
+        case .settings: return 0x3A3F52
+        }
+    }
+
+    /// Rich but calm: the same toning as the Android apps.
+    static func tone(_ hex: UInt32) -> NSColor {
+        let c = NSColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        if s < 0.12 { h = 228 / 360; s = 0.30 }
+        s = min(0.85, max(0.35, max(s * 1.25, 0.35)))
+        return NSColor(hue: h, saturation: s, brightness: 0.46, alpha: 1)
+    }
+
+    static func gradient(_ p: Page) -> LinearGradient {
+        let top = tone(base(p))
+        let bg = NSColor(red: 10 / 255, green: 11 / 255, blue: 18 / 255, alpha: 1)
+        func mix(_ t: CGFloat) -> Color { Color(nsColor: top.blended(withFraction: t, of: bg) ?? bg) }
+        return LinearGradient(colors: [Color(nsColor: top), mix(0.45), mix(0.85), Theme.bg], startPoint: .top, endPoint: .bottom)
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.bg
+            ForEach(Page.allCases) { p in
+                AmbientBackground.gradient(p).opacity(p == page ? 1 : 0)
+            }
+        }
+        .animation(.easeInOut(duration: 0.7), value: page)
+        .ignoresSafeArea()
+    }
 }
 
 struct ProgressLine: View {
@@ -58,9 +113,9 @@ struct PosterCard: View {
                     if store.isWatched(item) { WatchedBadge().padding(7) }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(hover ? Theme.accent : Color.clear, lineWidth: 3))
-                .shadow(color: .black.opacity(hover ? 0.45 : 0.2), radius: hover ? 10 : 4, y: 3)
-                .scaleEffect(hover ? 1.035 : 1)
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(hover ? Theme.focus : Color.clear, lineWidth: 3))
+                .shadow(color: .black.opacity(hover ? 0.5 : 0.2), radius: hover ? 14 : 4, y: hover ? 6 : 3)
+                .scaleEffect(hover ? 1.06 : 1)
             if showTitle {
                 Text(title ?? item.name)
                     .font(.system(size: 12, weight: .medium))
@@ -75,7 +130,7 @@ struct PosterCard: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.15), value: hover)
+        .animation(.easeOut(duration: 0.18), value: hover)
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture(perform: action)
@@ -98,9 +153,9 @@ struct WatchedBadge: View {
     var body: some View {
         Image(systemName: "checkmark")
             .font(.system(size: 11, weight: .heavy))
-            .foregroundStyle(.white)
+            .foregroundStyle(.black)
             .frame(width: 22, height: 22)
-            .background(Circle().fill(Theme.accent))
+            .background(Circle().fill(Color.white.opacity(0.95)))
             .shadow(color: .black.opacity(0.5), radius: 3)
     }
 }
@@ -127,8 +182,9 @@ struct ChannelCard: View {
                 )
                 .overlay(RemoteImage(url: item.iconURL, maxPixel: 320, mode: .fit).padding(16))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(hover ? Theme.accent : Color.clear, lineWidth: 3))
-                .scaleEffect(hover ? 1.035 : 1)
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(hover ? Theme.focus : Color.clear, lineWidth: 3))
+                .shadow(color: .black.opacity(hover ? 0.5 : 0), radius: 12, y: 5)
+                .scaleEffect(hover ? 1.06 : 1)
             Text(item.name)
                 .font(.system(size: 12, weight: .medium))
                 .lineLimit(1)
@@ -189,10 +245,7 @@ struct RankedCard: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: -14) {
-            Text("\(rank)")
-                .font(.system(size: 120, weight: .black, design: .rounded))
-                .foregroundStyle(Theme.gradient)
-                .shadow(color: .black.opacity(0.6), radius: 4)
+            OutlinedNumber(text: "\(rank)")
                 .frame(minWidth: 60)
                 .offset(y: 18)
             PosterCard(item: item, width: 128, showTitle: false, action: action)
@@ -274,6 +327,7 @@ struct CategoryColumn: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             .contextMenu(forSelectionType: String.self) { ids in
                 if let id = ids.first, let c = list.first(where: { $0.id == id })?.category {
                     Button(store.isFavCategory(kind, c) ? "Remove from Favourite Categories" : "Add to Favourite Categories") {
@@ -333,5 +387,24 @@ struct RenameSheet: View {
     private func save() {
         store.renameCategory(kind, category, to: name)
         dismiss()
+    }
+}
+
+/// Netflix-style rank number: the background colour inside, a light edge around it.
+struct OutlinedNumber: View {
+    let text: String
+
+    var body: some View {
+        let font = Font.system(size: 120, weight: .black, design: .rounded)
+        let edge = Color(hex: 0xEBEBF5).opacity(0.8)
+        ZStack {
+            ForEach(0..<16, id: \.self) { i in
+                let a = Double(i) / 16 * 2 * .pi
+                Text(text).font(font).foregroundStyle(edge).offset(x: 2.2 * cos(a), y: 2.2 * sin(a))
+            }
+            Text(text).font(font).foregroundStyle(Theme.bg)
+        }
+        .compositingGroup()
+        .shadow(color: .black.opacity(0.5), radius: 6)
     }
 }
