@@ -44,6 +44,7 @@ struct YMPlayerApp: App {
 struct RootView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var epg: EpgStore
+    @State private var intro = true // the logo animation at launch
 
     var body: some View {
         Group {
@@ -53,11 +54,14 @@ struct RootView: View {
                 main
             }
         }
-        .sheet(isPresented: Binding(get: { store.whatsNew != nil && store.session == nil && !store.showTour },
+        .overlay {
+            if intro { LaunchIntro { intro = false } }
+        }
+        .sheet(isPresented: Binding(get: { !intro && store.whatsNew != nil && store.session == nil && !store.showTour },
                                     set: { if !$0 { store.whatsNew = nil } })) {
             WhatsNewSheet(lines: store.whatsNew ?? [])
         }
-        .sheet(isPresented: Binding(get: { store.showTour && store.current != nil && store.session == nil },
+        .sheet(isPresented: Binding(get: { !intro && store.showTour && store.current != nil && store.session == nil },
                                     set: { if !$0 { store.finishTour() } })) {
             TourSheet().environmentObject(store)
         }
