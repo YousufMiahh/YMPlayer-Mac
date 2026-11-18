@@ -594,6 +594,9 @@ final class AppStore: ObservableObject {
         var seen = Set<String>()
         for h in data.recentVOD {
             if sources.count >= 3 { break }
+            // Only what you actually watched: finished, or at least 5 minutes in. Not something that
+            // was only opened, started by accident or played on its own for a moment
+            guard data.watched.contains(h.id) || (data.progress[h.id]?.position ?? 0) >= 300 else { continue }
             let src: Item
             if h.kind == .episode, let sid = h.seriesId {
                 var s = Item(kind: .series, streamId: sid, name: h.seriesName ?? h.name)
