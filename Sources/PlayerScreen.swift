@@ -197,16 +197,35 @@ struct PlayerScreen: View {
 
     private var overlay: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 22) {
+                // Netflix-style: Back, Play From Beginning, Next, Episodes along the top left
                 Button { store.closePlayer() } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 22, weight: .semibold)).frame(width: 30, height: 30)
+                    Image(systemName: "arrow.left").font(.system(size: 22, weight: .semibold)).frame(width: 30, height: 30)
                 }
                 .help("Back (Esc)")
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 20, weight: .bold)).lineLimit(1)
-                    if let s = subtitle, !s.isEmpty { Text(s).font(.system(size: 13)).foregroundStyle(.white.opacity(0.75)).lineLimit(1) }
+                if !live {
+                    Button { player.seek(0); if !player.playing { player.togglePause() }; store.show("Playing from the beginning") } label: {
+                        Image(systemName: "gobackward").font(.system(size: 21, weight: .semibold)).frame(width: 30, height: 30)
+                    }
+                    .help("Play From Beginning")
+                    if store.upNext != nil {
+                        Button { store.playNext() } label: {
+                            Image(systemName: "forward.end").font(.system(size: 20, weight: .semibold)).frame(width: 30, height: 30)
+                        }
+                        .help(store.hasNextEpisode ? "Next Episode" : "Next in Queue")
+                    }
+                    if item?.kind == .episode { episodesMenu }
                 }
                 Spacer()
+                // The title at the top right, while paused (or always for live channels)
+                if live || !player.playing {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(title).font(.system(size: 20, weight: .bold)).lineLimit(1)
+                        if let s = subtitle, !s.isEmpty { Text(s).font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.85)).lineLimit(1) }
+                    }
+                    .frame(maxWidth: 520, alignment: .trailing)
+                    .transition(.opacity)
+                }
             }
             .padding(.horizontal, 26)
             .padding(.top, 34)
@@ -273,6 +292,35 @@ struct PlayerScreen: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
+    }
+
+    /// Every episode of the series, by season, with the one playing ticked; choosing one plays it.
+    private var episodesMenu: some View {
+        let list = (store.session?.list ?? []).filter { $0.kind == .episode }
+        let seasons = Array(Set(list.compactMap { $0.season })).sorted()
+        return Menu {
+            if seasons.count > 1 {
+                ForEach(seasons, id: \.self) { sn in
+                    Menu(sn == 0 ? "Specials" : "Season \(sn)") { episodeButtons(list.filter { $0.season == sn }, all: list) }
+                }
+            } else {
+                episodeButtons(list, all: list)
+            }
+        } label: { Image(systemName: "rectangle.stack").font(.system(size: 20, weight: .semibold)) }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Episodes")
+    }
+
+    @ViewBuilder
+    private func episodeButtons(_ eps: [Item], all: [Item]) -> some View {
+        ForEach(eps) { ep in
+            Button { if ep.id != item?.id { store.play(ep, list: all) } } label: {
+                let name = (ep.episode.map { "\($0). " } ?? "") + ep.name + (store.isWatched(ep) && ep.id != item?.id ? "  ✓" : "")
+                if ep.id == item?.id { Label(name, systemImage: "play.fill") } else { Text(name) }
+            }
+        }
     }
 
     private var tracksMenus: some View {
