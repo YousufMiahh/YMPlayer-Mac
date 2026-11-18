@@ -121,11 +121,24 @@ struct Segments {
         if let i = longest(o["intro"]) { s.introStart = i.0; s.introEnd = i.1 }
         if let r = longest(o["recap"]) { s.recapStart = r.0; s.recapEnd = r.1 }
         if let c = longest(o["credits"]), c.0 > 0 { s.creditsStart = c.0 }
+        // Nothing for the intro or recap in this cut (the episode's length picks one): the intro is
+        // usually at the same place in every cut, so take it from the episode as a whole
+        var otherCut = false
+        if !s.hasIntro && !s.hasRecap && duration > 60 {
+            let any = await fetch(tmdb: tmdb, season: season, episode: episode, duration: 0)
+            if any.hasIntro || any.hasRecap {
+                s.introStart = any.introStart; s.introEnd = any.introEnd
+                s.recapStart = any.recapStart; s.recapEnd = any.recapEnd
+                if s.creditsStart <= 0 { s.creditsStart = any.creditsStart }
+                otherCut = true
+            }
+        }
         var parts: [String] = []
         if s.hasRecap { parts.append("recap \(clock(s.recapStart))–\(clock(s.recapEnd))") }
         if s.hasIntro { parts.append("intro \(clock(s.introStart))–\(clock(s.introEnd))") }
         if s.creditsStart > 0 { parts.append("credits \(clock(s.creditsStart))") }
-        s.status = what + ": " + (parts.isEmpty ? "no times yet" : parts.joined(separator: "  "))
+        if !parts.isEmpty && !s.hasIntro && !s.hasRecap { parts.append("·  no intro or recap times in TheIntroDB yet") }
+        s.status = what + ": " + (parts.isEmpty ? "no times yet" : parts.joined(separator: "  ")) + (otherCut ? "  (intro from another cut)" : "")
         return s
     }
 
