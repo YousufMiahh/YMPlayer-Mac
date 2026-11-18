@@ -11,3 +11,8 @@
 - AirPlay: watch on your Apple TV or AirPlay TV with the new AirPlay button in the player. Any film or episode works: the Mac converts it for the TV as it plays, so keep the Mac awake and YM Player open while you watch.
 - Chromecast: watch on a Chromecast or Google TV with the new TV button in the player. It works for every film, episode and channel the same way, so keep the Mac awake and YM Player open while you watch.
 - "Because you watched" now only uses films and series you actually watched (finished, or at least 5 minutes in), not ones you only opened or started by accident.
+- Skip Recap: alongside Skip Intro, from TheIntroDB. The captions menu shows what it found for each episode.
+- The player, Netflix-style: Back, Play From Beginning, Next Episode and an Episodes menu along the top. The title shows at the top right while paused.
+- Film and series pages, Netflix-style: Resume with its progress, Play From Beginning and Episodes & More, or Play and Audio & Subtitles for something new. Something you're part way through plays behind the page.
+- Home: rest the pointer on a film or series and it widens and plays a preview (Settings → Home Screen to turn it off).
+- Because you watched: right-click a card for "Don't Recommend Based on…".
