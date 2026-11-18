@@ -5,6 +5,7 @@ import SwiftUI
 /// and a sweep of light crosses the tile; then the name, and on into the app.
 struct LaunchIntro: View {
     let done: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var tileIn = false
     @State private var lettersIn = false
@@ -96,6 +97,12 @@ struct LaunchIntro: View {
     }
 
     private func run() {
+        if reduceMotion { // Reduce Motion: the finished logo, a short pause, then a fade
+            tileIn = true; lettersIn = true; playIn = true; textIn = true
+            after(1.0) { withAnimation(.easeInOut(duration: 0.3)) { leaving = true } }
+            after(1.35) { done() }
+            return
+        }
         withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) { tileIn = true }
         after(0.16) { withAnimation(.spring(response: 0.48, dampingFraction: 0.68)) { lettersIn = true } }
         after(0.64) {

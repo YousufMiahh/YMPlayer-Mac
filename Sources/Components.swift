@@ -12,7 +12,9 @@ enum Theme {
     static let text3 = dyn(ns(0xEBEBF5, 0.30), ns(0x3C3C43, 0.36))
     static let focus = dyn(.white, ns(0x1D1D1F))         // the TV app's focus highlight
     static let onFocus = dyn(ns(0x0B0B0F), .white)
-    static let ease = Animation.timingCurve(0.2, 0.9, 0.3, 1, duration: 0.36) // the apps' decelerate curve, Netflix-paced
+    /// A critically damped spring (no overshoot): it starts from wherever things are and at the speed
+    /// they're already moving, so a transition can be interrupted and turned round without a jump.
+    static let ease = Animation.spring(response: 0.36, dampingFraction: 1)
 
     static func ns(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
         NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
