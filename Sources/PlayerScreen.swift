@@ -64,7 +64,7 @@ struct PlayerScreen: View {
                     HStack {
                         Spacer()
                         Button(action: skipIntro) {
-                            Text("Skip Intro")
+                            Text(skipRecap ? "Skip Recap" : "Skip Intro")
                                 .font(.system(size: 16, weight: .bold))
                                 .padding(.horizontal, 22).padding(.vertical, 12)
                                 .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -141,15 +141,23 @@ struct PlayerScreen: View {
 
     // MARK: Skip Intro / Next card
 
+    /// The recap is playing (rather than the intro).
+    private var skipRecap: Bool {
+        guard let s = store.segments, s.hasRecap else { return false }
+        return player.time >= s.recapStart - 0.5 && player.time < s.recapEnd - 1.5
+    }
+
     private var showSkip: Bool {
-        guard !live, let s = store.segments, s.hasIntro, scrub == nil else { return false }
+        guard !live, let s = store.segments, s.hasIntro || s.hasRecap, scrub == nil else { return false }
         let t = player.time
-        return t >= max(0, s.introStart) && t < s.introEnd - 1
+        return skipRecap || (s.hasIntro && t >= s.introStart - 0.5 && t < s.introEnd - 1.5)
     }
 
     private func skipIntro() {
-        guard let s = store.segments, s.hasIntro else { return }
-        player.seek(s.introEnd)
+        guard let s = store.segments else { return }
+        let recap = skipRecap
+        player.seek(recap ? s.recapEnd : s.introEnd)
+        store.show(recap ? "Skipped the recap" : "Skipped the intro")
         poke()
     }
 
@@ -304,6 +312,10 @@ struct PlayerScreen: View {
                 }
                 Divider()
                 Button("Add Subtitle File…") { pickSubtitle() }
+                if item?.kind == .episode {
+                    Divider()
+                    Text("Skip Intro: " + (store.segments?.status ?? "looking up this episode…"))
+                }
             } label: { Image(systemName: "captions.bubble") }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)

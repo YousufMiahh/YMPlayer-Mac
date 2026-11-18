@@ -581,9 +581,13 @@ final class AppStore: ObservableObject {
         segments = nil
         guard it.kind == .episode, let season = it.season, let ep = it.episode, let series = it.seriesName else { return }
         let id = it.id
+        let length = data.progress[it.id]?.duration ?? 0 // from an earlier play: picks the right cut
         Task {
-            guard let tmdb = await Tmdb.findId(.tv, name: series, known: it.tmdb),
-                  let s = await Segments.fetch(tmdb: tmdb, season: season, episode: ep) else { return }
+            guard let tmdb = await Tmdb.findId(.tv, name: series, known: it.tmdb) else {
+                if session?.item.id == id { segments = Segments(status: "Couldn't find this show on TMDB") }
+                return
+            }
+            let s = await Segments.fetch(tmdb: tmdb, season: season, episode: ep, duration: length)
             if session?.item.id == id { segments = s }
         }
     }

@@ -85,42 +85,69 @@ enum Tmdb {
     }
 }
 
-/// Where an episode's intro and end credits are, from TheIntroDB (theintrodb.org) — a free
-/// community database used by Jellyfin, Emby and Kodi — looked up by the series' TMDB id,
-/// season and episode. When a show isn't covered there's simply no Skip Intro button.
+/// Where an episode's recap, intro and end credits are, from TheIntroDB (theintrodb.org), a free
+/// community database used by Jellyfin, Emby and Kodi, looked up by the series' TMDB id, season and
+/// episode (and its length, so it picks the right cut). When a show isn't covered there's simply
+/// no Skip button.
 struct Segments {
     var introStart: Double = -1   // seconds
     var introEnd: Double = -1
+    var recapStart: Double = -1
+    var recapEnd: Double = -1
     var creditsStart: Double = -1
+    /// What happened, shown in the player's menu so a missing button can be explained.
+    var status = ""
 
     var hasIntro: Bool { introEnd > 0 && introEnd > introStart }
+    var hasRecap: Bool { recapEnd > 0 && recapEnd > recapStart }
 
-    static func fetch(tmdb: String, season: Int, episode: Int) async -> Segments? {
-        guard let url = URL(string: "https://api.theintrodb.org/v4/media?tmdb_id=\(tmdb)&season=\(season)&episode=\(episode)") else { return nil }
+    static func clock(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 60, Int(s) % 60) }
+
+    static func fetch(tmdb: String, season: Int, episode: Int, duration: Double = 0) async -> Segments {
+        let what = "TMDB \(tmdb) S\(season)E\(episode)"
+        var q = "https://api.theintrodb.org/v4/media?tmdb_id=\(tmdb)&season=\(season)&episode=\(episode)"
+        if duration > 60 { q += "&duration_ms=\(Int(duration * 1000))" }
+        guard let url = URL(string: q) else { return Segments(status: "Bad address") }
         var r = URLRequest(url: url, timeoutInterval: 15)
-        r.setValue("YMPlayer/1.0", forHTTPHeaderField: "User-Agent")
-        guard let res = try? await URLSession.shared.data(for: r),
-              (res.1 as? HTTPURLResponse)?.statusCode == 200,
-              var o = (try? JSONSerialization.jsonObject(with: res.0)) as? [String: Any] else { return nil }
+        r.setValue("Mozilla/5.0 (YMPlayer)", forHTTPHeaderField: "User-Agent")
+        guard let res = try? await URLSession.shared.data(for: r) else { return Segments(status: "Couldn't reach TheIntroDB") }
+        let code = (res.1 as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 404 { return Segments(status: "Not in TheIntroDB (\(what))") }
+        guard code == 200, var o = (try? JSONSerialization.jsonObject(with: res.0)) as? [String: Any] else {
+            return Segments(status: "TheIntroDB answered \(code)")
+        }
         if o["intro"] == nil, let inner = o["data"] as? [String: Any] { o = inner }
         var s = Segments()
-        if let i = first(o["intro"]) {
-            s.introStart = max(0, i.0)
-            s.introEnd = i.1
-        }
-        if let c = first(o["credits"]), c.0 > 0 { s.creditsStart = c.0 }
+        if let i = longest(o["intro"]) { s.introStart = i.0; s.introEnd = i.1 }
+        if let r = longest(o["recap"]) { s.recapStart = r.0; s.recapEnd = r.1 }
+        if let c = longest(o["credits"]), c.0 > 0 { s.creditsStart = c.0 }
+        var parts: [String] = []
+        if s.hasRecap { parts.append("recap \(clock(s.recapStart))–\(clock(s.recapEnd))") }
+        if s.hasIntro { parts.append("intro \(clock(s.introStart))–\(clock(s.introEnd))") }
+        if s.creditsStart > 0 { parts.append("credits \(clock(s.creditsStart))") }
+        s.status = what + ": " + (parts.isEmpty ? "no times yet" : parts.joined(separator: "  "))
         return s
     }
 
-    /// First segment as (start, end) in seconds; a missing start means 0, a missing end means -1.
-    private static func first(_ v: Any?) -> (Double, Double)? {
-        var o: [String: Any]?
-        if let a = v as? [Any] { o = a.first as? [String: Any] } else { o = v as? [String: Any] }
-        guard let seg = o else { return nil }
-        let start = (seg["start_ms"] as? NSNumber).map { $0.doubleValue / 1000 } ?? -1
-        let end = (seg["end_ms"] as? NSNumber).map { $0.doubleValue / 1000 } ?? -1
-        if start <= 0 && end <= 0 { return nil } // {0,0}: confirmed there isn't one
-        return (start, end)
+    /// The segment as (start, end) in seconds: a missing start is 0, a missing end -1. The longest of several.
+    private static func longest(_ v: Any?) -> (Double, Double)? {
+        let list: [[String: Any]] = (v as? [[String: Any]]) ?? ((v as? [String: Any]).map { [$0] } ?? [])
+        var best: (Double, Double)?
+        for seg in list {
+            func n(_ a: String, _ b: String) -> Double {
+                ((seg[a] as? NSNumber) ?? (seg[b] as? NSNumber)).map { $0.doubleValue / 1000 } ?? -1
+            }
+            var start = n("start_ms", "startMs")
+            let end = n("end_ms", "endMs")
+            if start <= 0 && end <= 0 { continue } // {0,0}: confirmed there isn't one
+            if start < 0 { start = 0 }
+            if let b = best {
+                if end > 0, b.1 > 0, end - start > b.1 - b.0 { best = (start, end) }
+            } else {
+                best = (start, end)
+            }
+        }
+        return best
     }
 }
 
