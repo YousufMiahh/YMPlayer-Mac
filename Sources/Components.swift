@@ -396,6 +396,14 @@ struct CategoryColumn: View {
                         Image(systemName: e.icon).foregroundStyle(e.favourite ? Theme.pink : Color.secondary)
                     }
                     .tag(e.id)
+                    .swipeActions(edge: .trailing) { // two-finger swipe left on the trackpad: hide it
+                        if let c = e.category {
+                            Button(role: .destructive) {
+                                if selection == c.id { selection = Special.all }
+                                store.hideCategory(kind, c)
+                            } label: { Label("Hide", systemImage: "eye.slash") }
+                        }
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -413,7 +421,7 @@ struct CategoryColumn: View {
                 }
             }
             Divider()
-            Text("Right-click a category to favourite, rename or hide it")
+            Text("Right-click a category to favourite, rename or hide it, or swipe left to hide")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

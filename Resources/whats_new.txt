@@ -1,18 +1,9 @@
-- New look: the same colours as YM Player on TV and phone, with the glowing background that changes colour for each section, and smooth slides and fades as you move around.
-- Light and dark: the app now follows your Mac's light or dark mode. Choose Light or Dark instead in Settings → Appearance.
-- Picture: the new picture button in the player lets you choose Fit, Fill Screen, Stretch, 16:9 or 4:3, remembered for each channel, film and series. Or pinch the trackpad.
-- Trailers now play right here in the app.
-- Subtitles: choose their size, colour and background in Settings.
-- Home Screen: choose which rows show in Settings. When there's nothing to base "Because you watched" on, you get "Recommended for You" instead.
-- Frozen picture: if the picture freezes while the sound carries on, the stream reconnects by itself.
-- Updates: YM Player now updates itself. It tells you when a new version is out and installs it for you.
-- A quick tour for new users, and Settings → Show Tutorial to see it again.
-- Fixed: signing in to providers with an http:// address failed with an "App Transport Security" error.
-- AirPlay: watch on your Apple TV or AirPlay TV with the new AirPlay button in the player. Any film or episode works: the Mac converts it for the TV as it plays, so keep the Mac awake and YM Player open while you watch.
-- Chromecast: watch on a Chromecast or Google TV with the new TV button in the player. It works for every film, episode and channel the same way, so keep the Mac awake and YM Player open while you watch.
-- "Because you watched" now only uses films and series you actually watched (finished, or at least 5 minutes in), not ones you only opened or started by accident.
-- Skip Recap: alongside Skip Intro, from TheIntroDB. The captions menu shows what it found for each episode.
-- The player, Netflix-style: Back, Play From Beginning, Next Episode and an Episodes menu along the top. The title shows at the top right while paused.
+- A new launch animation: the Y and M fly in and lock together to make the logo.
 - Film and series pages, Netflix-style: Resume with its progress, Play From Beginning and Episodes & More, or Play and Audio & Subtitles for something new. Something you're part way through plays behind the page.
 - Home: rest the pointer on a film or series and it widens and plays a preview (Settings → Home Screen to turn it off).
-- Because you watched: right-click a card for "Don't Recommend Based on…".
+- The player, Netflix-style: Back, Play From Beginning, Next Episode and an Episodes menu along the top. The title shows at the top right while paused.
+- Skip Intro and Skip Recap now also use SkipDB and IntroDB when TheIntroDB has nothing. The captions menu shows what was found for each episode.
+- Because you watched: only titles you actually watched, and right-click a card for "Don't Recommend Based on…".
+- Categories: swipe left on a category with two fingers to hide it.
+- AirPlay and Chromecast: watch any film, episode or channel on your Apple TV, AirPlay TV, Chromecast or Google TV. Keep the Mac awake and YM Player open while you watch.
+- New look to match YM Player on TV and phone, light and dark mode, picture shapes, trailers in the app, subtitle styles and automatic updates.
