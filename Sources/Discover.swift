@@ -18,6 +18,17 @@ enum Tmdb {
         return (try JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:]
     }
 
+    private static var imdbCache: [String: String] = [:]
+
+    /// A series' IMDb id ("tt0903747") from its TMDB id, for the skip-intro databases that use it.
+    @MainActor static func imdbId(_ tvId: String) async -> String? {
+        if let v = imdbCache[tvId] { return v.isEmpty ? nil : v }
+        guard let o = try? await get("/tv/\(tvId)/external_ids") else { return nil }
+        let v = (o["imdb_id"] as? String) ?? ""
+        imdbCache[tvId] = v.hasPrefix("tt") ? v : ""
+        return v.hasPrefix("tt") ? v : nil
+    }
+
     /// "EN - Breaking Bad (2008) [4K]" → ("Breaking Bad", "2008"). Only a provider's tag comes off the
     /// front ("EN - ", "UK: ", "NF | "), never part of a title ("CSI: Miami", "24: Legacy"); a title
     /// that is a year ("1917") stays. `full` keeps an unbracketed trailing number ("Blade Runner 2049").
@@ -103,43 +114,81 @@ struct Segments {
 
     static func clock(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 60, Int(s) % 60) }
 
+    /// TheIntroDB first (this cut, then the episode as a whole); with no intro or recap there,
+    /// SkipDB (skipdb.tv) and then IntroDB (introdb.app), which go by the IMDb id.
     static func fetch(tmdb: String, season: Int, episode: Int, duration: Double = 0) async -> Segments {
         let what = "TMDB \(tmdb) S\(season)E\(episode)"
-        var q = "https://api.theintrodb.org/v4/media?tmdb_id=\(tmdb)&season=\(season)&episode=\(episode)"
-        if duration > 60 { q += "&duration_ms=\(Int(duration * 1000))" }
-        guard let url = URL(string: q) else { return Segments(status: "Bad address") }
-        var r = URLRequest(url: url, timeoutInterval: 15)
-        r.setValue("Mozilla/5.0 (YMPlayer)", forHTTPHeaderField: "User-Agent")
-        guard let res = try? await URLSession.shared.data(for: r) else { return Segments(status: "Couldn't reach TheIntroDB") }
-        let code = (res.1 as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 404 { return Segments(status: "Not in TheIntroDB (\(what))") }
-        guard code == 200, var o = (try? JSONSerialization.jsonObject(with: res.0)) as? [String: Any] else {
-            return Segments(status: "TheIntroDB answered \(code)")
-        }
-        if o["intro"] == nil, let inner = o["data"] as? [String: Any] { o = inner }
+        let base = "https://api.theintrodb.org/v4/media?tmdb_id=\(tmdb)&season=\(season)&episode=\(episode)"
         var s = Segments()
-        if let i = longest(o["intro"]) { s.introStart = i.0; s.introEnd = i.1 }
-        if let r = longest(o["recap"]) { s.recapStart = r.0; s.recapEnd = r.1 }
-        if let c = longest(o["credits"]), c.0 > 0 { s.creditsStart = c.0 }
+        var source = "TheIntroDB"
+        var inTidb = true
+        let first = await json(base + (duration > 60 ? "&duration_ms=\(Int(duration * 1000))" : ""))
+        if first.code == 404 {
+            inTidb = false
+        } else if let o = first.body {
+            s = parse(o)
+        } else {
+            return Segments(status: first.code == 0 ? "Couldn't reach TheIntroDB" : "TheIntroDB answered \(first.code)")
+        }
         // Nothing for the intro or recap in this cut (the episode's length picks one): the intro is
         // usually at the same place in every cut, so take it from the episode as a whole
-        var otherCut = false
-        if !s.hasIntro && !s.hasRecap && duration > 60 {
-            let any = await fetch(tmdb: tmdb, season: season, episode: episode, duration: 0)
-            if any.hasIntro || any.hasRecap {
-                s.introStart = any.introStart; s.introEnd = any.introEnd
-                s.recapStart = any.recapStart; s.recapEnd = any.recapEnd
-                if s.creditsStart <= 0 { s.creditsStart = any.creditsStart }
-                otherCut = true
+        if inTidb && !s.hasIntro && !s.hasRecap && duration > 60, let o = await json(base).body {
+            if take(&s, parse(o)) { source = "TheIntroDB, another cut" }
+        }
+        // Still nothing: the other free databases, which go by the IMDb id
+        if !s.hasIntro && !s.hasRecap, let imdb = await Tmdb.imdbId(tmdb) {
+            let q = "?imdb_id=\(imdb)&season=\(season)&episode=\(episode)"
+            if let o = await json("https://api.skipdb.tv/api/segments" + q + (duration > 60 ? "&duration=\(Int(duration))" : "")).body,
+               take(&s, parse((o["segments"] as? [String: Any]) ?? o)) {
+                source = "SkipDB"
+            }
+            if !s.hasIntro && !s.hasRecap, let o = await json("https://api.introdb.app/segments" + q).body,
+               take(&s, parse((o["segments"] as? [String: Any]) ?? o)) {
+                source = "IntroDB"
             }
         }
         var parts: [String] = []
         if s.hasRecap { parts.append("recap \(clock(s.recapStart))–\(clock(s.recapEnd))") }
         if s.hasIntro { parts.append("intro \(clock(s.introStart))–\(clock(s.introEnd))") }
         if s.creditsStart > 0 { parts.append("credits \(clock(s.creditsStart))") }
-        if !parts.isEmpty && !s.hasIntro && !s.hasRecap { parts.append("·  no intro or recap times in TheIntroDB yet") }
-        s.status = what + ": " + (parts.isEmpty ? "no times yet" : parts.joined(separator: "  ")) + (otherCut ? "  (intro from another cut)" : "")
+        if s.hasIntro || s.hasRecap { parts.append("(\(source))") }
+        else if !parts.isEmpty { parts.append("·  no intro or recap times in TheIntroDB, SkipDB or IntroDB yet") }
+        else { parts.append(inTidb ? "no times yet" : "not in TheIntroDB, SkipDB or IntroDB") }
+        s.status = what + ": " + parts.joined(separator: "  ")
         return s
+    }
+
+    /// GET a JSON object: (HTTP status, body). Status 0 when it couldn't be reached.
+    private static func json(_ address: String) async -> (code: Int, body: [String: Any]?) {
+        guard let url = URL(string: address) else { return (0, nil) }
+        var r = URLRequest(url: url, timeoutInterval: 15)
+        r.setValue("Mozilla/5.0 (YMPlayer)", forHTTPHeaderField: "User-Agent")
+        guard let res = try? await URLSession.shared.data(for: r) else { return (0, nil) }
+        let code = (res.1 as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { return (code, nil) }
+        return (code, (try? JSONSerialization.jsonObject(with: res.0)) as? [String: Any])
+    }
+
+    private static func parse(_ body: [String: Any]) -> Segments {
+        var o = body
+        if o["intro"] == nil, let inner = o["data"] as? [String: Any] { o = inner }
+        var s = Segments()
+        if let i = longest(o["intro"]) { s.introStart = i.0; s.introEnd = i.1 }
+        if let r = longest(o["recap"]) { s.recapStart = r.0; s.recapEnd = r.1 }
+        if let c = longest(o["credits"]) ?? longest(o["outro"]), c.0 > 0 { s.creditsStart = c.0 } // SkipDB / IntroDB: outro
+        return s
+    }
+
+    /// Copies the intro and recap from `from` (and the credits if there were none). True if it had any.
+    private static func take(_ to: inout Segments, _ from: Segments) -> Bool {
+        guard from.hasIntro || from.hasRecap else {
+            if to.creditsStart <= 0 && from.creditsStart > 0 { to.creditsStart = from.creditsStart }
+            return false
+        }
+        to.introStart = from.introStart; to.introEnd = from.introEnd
+        to.recapStart = from.recapStart; to.recapEnd = from.recapEnd
+        if to.creditsStart <= 0 { to.creditsStart = from.creditsStart }
+        return true
     }
 
     /// The segment as (start, end) in seconds: a missing start is 0, a missing end -1. The longest of several.
@@ -151,7 +200,11 @@ struct Segments {
                 ((seg[a] as? NSNumber) ?? (seg[b] as? NSNumber)).map { $0.doubleValue / 1000 } ?? -1
             }
             var start = n("start_ms", "startMs")
-            let end = n("end_ms", "endMs")
+            var end = n("end_ms", "endMs")
+            if start < 0 && end < 0 { // IntroDB gives seconds
+                start = ((seg["start_sec"] as? NSNumber) ?? (seg["start"] as? NSNumber))?.doubleValue ?? -1
+                end = ((seg["end_sec"] as? NSNumber) ?? (seg["end"] as? NSNumber))?.doubleValue ?? -1
+            }
             if start <= 0 && end <= 0 { continue } // {0,0}: confirmed there isn't one
             if start < 0 { start = 0 }
             if let b = best {
