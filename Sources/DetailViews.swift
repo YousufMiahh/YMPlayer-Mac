@@ -9,8 +9,11 @@ struct DetailSheet: View {
 }
 
 private struct Backdrop: View {
+    @EnvironmentObject var store: AppStore
     let url: URL?
     let blurred: Bool
+    /// Whose muted preview may play behind the page (Netflix-style), if any.
+    var previewOwner: String? = nil
 
     var body: some View {
         ZStack {
@@ -18,10 +21,38 @@ private struct Backdrop: View {
             RemoteImage(url: url, maxPixel: 1400)
                 .blur(radius: blurred ? 40 : 0)
                 .opacity(blurred ? 0.6 : 0.85)
+            if let o = previewOwner, store.pagePreviewOwner == o {
+                PagePreviewLayer(preview: store.preview)
+            }
         }
         .overlay(LinearGradient(colors: [Theme.bg.opacity(0.35), Theme.bg.opacity(0.85), Theme.bg.opacity(0.97)],
                                 startPoint: .top, endPoint: .bottom))
         .clipped()
+    }
+}
+
+/// Audio & Subtitles before you start: the languages the player picks when it can.
+struct AudioSubtitlesMenu: View {
+    @AppStorage("subLang") private var subLang = ""
+    @AppStorage("audioLang") private var audioLang = ""
+
+    var body: some View {
+        Menu {
+            Picker("Subtitles", selection: $subLang) {
+                Text("Off").tag("off")
+                Text("English").tag("en")
+                Text("As the stream sets them").tag("")
+            }
+            .pickerStyle(.inline)
+            Picker("Audio", selection: $audioLang) {
+                Text("English").tag("en")
+                Text("Original (as the stream sets it)").tag("")
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("Audio & Subtitles", systemImage: "captions.bubble")
+        }
+        .fixedSize()
     }
 }
 
@@ -60,7 +91,7 @@ struct MovieDetail: View {
     var body: some View {
         let progress = store.data.progress[item.id]
         ZStack(alignment: .topTrailing) {
-            Backdrop(url: Item.url(info?.backdrop ?? item.icon), blurred: info?.backdrop == nil)
+            Backdrop(url: Item.url(info?.backdrop ?? item.icon), blurred: info?.backdrop == nil, previewOwner: item.id)
             HStack(alignment: .top, spacing: 30) {
                 PosterCard(item: item, width: 230, showTitle: false) {}
                 VStack(alignment: .leading, spacing: 14) {
@@ -78,18 +109,23 @@ struct MovieDetail: View {
                     if let d = info?.director { Text("Director: " + d).font(.callout).foregroundStyle(.secondary).lineLimit(1) }
                     Spacer(minLength: 6)
                     if let p = progress {
-                        ProgressLine(value: p.fraction).frame(maxWidth: 320)
+                        HStack(spacing: 10) {
+                            ProgressLine(value: p.fraction).frame(maxWidth: 220)
+                            Text(Fmt.clock(max(0, p.duration - p.position)) + " left").font(.callout).foregroundStyle(.secondary)
+                        }
                     }
+                    // Netflix: Resume / Play From Beginning, or Play / Audio & Subtitles
                     HStack(spacing: 10) {
-                        if let p = progress {
+                        if progress != nil {
                             Button { go(nil) } label: {
-                                Label("Resume from \(Fmt.clock(p.position))", systemImage: "play.fill").padding(.horizontal, 6)
+                                Label("Resume", systemImage: "play.fill").padding(.horizontal, 10)
                             }
                             .buttonStyle(.borderedProminent)
-                            Button { go(0) } label: { Label("Play from Start", systemImage: "arrow.counterclockwise") }
+                            Button { go(0) } label: { Label("Play From Beginning", systemImage: "arrow.counterclockwise") }
                         } else {
                             Button { go(0) } label: { Label("Play", systemImage: "play.fill").padding(.horizontal, 14) }
                                 .buttonStyle(.borderedProminent)
+                            AudioSubtitlesMenu()
                         }
                         Button { store.toggleFavourite(item) } label: {
                             Label(store.isFavourite(item) ? "Favourite" : "Add to Favourites", systemImage: store.isFavourite(item) ? "heart.fill" : "heart")
@@ -115,13 +151,22 @@ struct MovieDetail: View {
             CloseButton()
         }
         .frame(width: 940, height: 580)
-        .task { info = try? await store.api?.vodInfo(item) }
+        .task {
+            info = try? await store.api?.vodInfo(item)
+            // Part way through: it plays (muted) behind the page after a moment, from where you were
+            if let p = store.data.progress[item.id], p.position > 30 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if !Task.isCancelled { store.startPagePreview(item, at: p.position, owner: item.id) }
+            }
+        }
+        .onDisappear { store.stopPagePreview(owner: item.id) }
         .sheet(item: Binding(get: { trailer.map { TrailerID(id: $0) } }, set: { trailer = $0?.id })) { t in
             TrailerSheet(videoId: t.id, title: item.name)
         }
     }
 
     private func go(_ from: Double?) {
+        store.stopPagePreview(owner: item.id)
         dismiss()
         var it = item
         if it.tmdb == nil { it.tmdb = info?.tmdb }
@@ -139,14 +184,42 @@ struct SeriesDetail: View {
     @State private var season = 0
     @State private var trailer: String?
 
+    @State private var scrollTarget: String?
+
     private var lastWatched: WatchProgress? {
         store.data.progress.values.filter { $0.item.seriesId == item.streamId }.max { $0.updated < $1.updated }
+    }
+
+    /// What Resume / Play starts (Netflix): the episode you were on (the next once it's finished), or the first.
+    private var target: (ep: Item, resume: Bool)? {
+        guard let info = info else { return nil }
+        let all = info.allEpisodes
+        guard let first = all.first(where: { ($0.season ?? 1) > 0 }) ?? all.first else { return nil }
+        if let lw = lastWatched, let i = all.firstIndex(where: { $0.id == lw.item.id }) {
+            var t = all[i]
+            if store.isWatched(t), i + 1 < all.count { t = all[i + 1] }
+            return (t, true)
+        }
+        return (first, false)
+    }
+
+    /// "S1: Ep. 3" to resume, "S1: E1" to start.
+    private func heroName(_ ep: Item, resume: Bool) -> String {
+        guard let s = ep.season, let e = ep.episode else { return ep.episodeLabel ?? "" }
+        return resume ? "S\(s): Ep. \(e)" : "S\(s): E\(e)"
+    }
+
+    /// Episodes & More: that episode's season, scrolled to it.
+    private func showEpisodes(_ ep: Item) {
+        if let s = ep.season, info?.seasons[s] != nil { season = s }
+        scrollTarget = nil
+        DispatchQueue.main.async { scrollTarget = ep.id }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                Backdrop(url: Item.url(info?.backdrop ?? info?.cover ?? item.icon), blurred: info?.backdrop == nil)
+                Backdrop(url: Item.url(info?.backdrop ?? info?.cover ?? item.icon), blurred: info?.backdrop == nil, previewOwner: item.id)
                 HStack(alignment: .top, spacing: 26) {
                     PosterCard(item: item, width: 150, showTitle: false) {}
                     VStack(alignment: .leading, spacing: 10) {
@@ -157,19 +230,25 @@ struct SeriesDetail: View {
                         if let p = info?.plot ?? item.plot {
                             Text(p).font(.system(size: 13)).lineLimit(4).lineSpacing(2)
                         }
+                        if let t = target, t.resume, let p = store.data.progress[t.ep.id], p.position > 0, p.duration > 0 {
+                            HStack(spacing: 10) {
+                                ProgressLine(value: p.fraction).frame(maxWidth: 200)
+                                Text(Fmt.clock(max(0, p.duration - p.position)) + " left").font(.callout).foregroundStyle(.secondary)
+                            }
+                        }
+                        // Netflix: Resume S1: Ep. 3 / Play From Beginning / Episodes & More, or
+                        // Play S1: E1 / Episodes & More / Audio & Subtitles for one you haven't started
                         HStack(spacing: 10) {
-                            if let info = info, let first = info.allEpisodes.first {
-                                if let lw = lastWatched {
-                                    Button { play(lw.item) } label: {
-                                        Label("Continue \(lw.item.episodeLabel ?? "")", systemImage: "play.fill").padding(.horizontal, 6)
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                } else {
-                                    Button { play(first) } label: {
-                                        Label("Play \(first.episodeLabel ?? "")", systemImage: "play.fill").padding(.horizontal, 6)
-                                    }
-                                    .buttonStyle(.borderedProminent)
+                            if let t = target {
+                                Button { play(t.ep) } label: {
+                                    Label((t.resume ? "Resume " : "Play ") + heroName(t.ep, resume: t.resume), systemImage: "play.fill").padding(.horizontal, 6)
                                 }
+                                .buttonStyle(.borderedProminent)
+                                if t.resume {
+                                    Button { play(t.ep, from: 0) } label: { Label("Play From Beginning", systemImage: "arrow.counterclockwise") }
+                                }
+                                Button { showEpisodes(t.ep) } label: { Label("Episodes & More", systemImage: "list.bullet") }
+                                if !t.resume { AudioSubtitlesMenu() }
                             }
                             Button { store.toggleFavourite(item) } label: {
                                 Label(store.isFavourite(item) ? "Favourite" : "Add to Favourites", systemImage: store.isFavourite(item) ? "heart.fill" : "heart")
@@ -220,6 +299,7 @@ struct SeriesDetail: View {
                     }
                     .padding(.horizontal, 30)
                     .padding(.vertical, 12)
+                    ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 8) {
                             ForEach(eps) { ep in
@@ -252,6 +332,11 @@ struct SeriesDetail: View {
                         .padding(.horizontal, 24)
                         .padding(.bottom, 20)
                     }
+                    .onAppear { if let id = scrollTarget { proxy.scrollTo(id, anchor: .top) } }
+                    .onChange(of: scrollTarget) { id in
+                        if let id = id { withAnimation(Theme.ease) { proxy.scrollTo(id, anchor: .top) } }
+                    }
+                    }
                     .id(season)
                     .transition(.opacity.combined(with: .offset(y: 16))) // as on the apps: a new season's episodes rise in
                     .animation(Theme.ease, value: season)
@@ -275,8 +360,15 @@ struct SeriesDetail: View {
                 if let lw = lastWatched?.item.season, keys.contains(lw) { season = lw } else { season = keys.first(where: { $0 > 0 }) ?? keys.first ?? 0 }
             } catch {
                 failed = true
+                return
+            }
+            // Part way through: it plays (muted) behind the page after a moment, from where you were
+            if let t = target, t.resume, let p = store.data.progress[t.ep.id], p.position > 30 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if !Task.isCancelled { store.startPagePreview(t.ep, at: p.position, owner: item.id) }
             }
         }
+        .onDisappear { store.stopPagePreview(owner: item.id) }
     }
 
     private func seasonLabel(_ s: Int, _ eps: [Item]) -> String {
@@ -286,10 +378,11 @@ struct SeriesDetail: View {
         return w == eps.count ? name + "  ✓" : name + "  \(w)/\(eps.count)"
     }
 
-    private func play(_ ep: Item) {
+    private func play(_ ep: Item, from: Double? = nil) {
         let list = info?.allEpisodes ?? [ep]
+        store.stopPagePreview(owner: item.id)
         dismiss()
-        store.play(ep, list: list)
+        store.play(ep, list: list, from: from)
     }
 }
 

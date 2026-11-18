@@ -12,7 +12,7 @@ enum Theme {
     static let text3 = dyn(ns(0xEBEBF5, 0.30), ns(0x3C3C43, 0.36))
     static let focus = dyn(.white, ns(0x1D1D1F))         // the TV app's focus highlight
     static let onFocus = dyn(ns(0x0B0B0F), .white)
-    static let ease = Animation.timingCurve(0.2, 0.9, 0.3, 1, duration: 0.28) // the apps' decelerate curve
+    static let ease = Animation.timingCurve(0.2, 0.9, 0.3, 1, duration: 0.36) // the apps' decelerate curve, Netflix-paced
 
     static func ns(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
         NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
@@ -110,15 +110,19 @@ struct PosterCard: View {
     var subtitle: String? = nil
     var progress: Double? = nil
     var showTitle = true
+    /// Home, Netflix-style: rest the pointer on it and it widens to 16:9, then plays (muted).
+    var peek = false
     let action: () -> Void
     var extraMenu: (() -> AnyView)? = nil
     @State private var hover = false
+    @State private var widened = false
+    @State private var peekTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Color.clear
-                .aspectRatio(2.0 / 3.0, contentMode: .fit)
-                .frame(width: width)
+                .aspectRatio(widened ? 16.0 / 9.0 : 2.0 / 3.0, contentMode: .fit)
+                .frame(width: width.map { widened ? $0 * 1.5 * 16.0 / 9.0 : $0 })
                 .background(Theme.card)
                 .overlay(
                     Text(item.displayTitle)
@@ -128,6 +132,9 @@ struct PosterCard: View {
                         .padding(10)
                 )
                 .overlay(RemoteImage(url: item.posterURL, maxPixel: 480))
+                .overlay {
+                    if widened && store.pagePreviewOwner == item.id { PagePreviewLayer(preview: store.preview) }
+                }
                 .overlay(alignment: .bottom) {
                     if let p = progress { ProgressLine(value: p).padding(8) }
                 }
@@ -152,10 +159,17 @@ struct PosterCard: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.18), value: hover)
+        .animation(.easeOut(duration: 0.22), value: hover)
         .contentShape(Rectangle())
-        .onHover { hover = $0 }
-        .onTapGesture(perform: action)
+        .onHover { h in
+            hover = h
+            if peek { schedulePeek(h) }
+        }
+        .onTapGesture {
+            if peek { schedulePeek(false) }
+            action()
+        }
+        .onDisappear { if peek { schedulePeek(false) } }
         .contextMenu {
             if item.kind != .episode {
                 Button(store.isFavourite(item) ? "Remove from Favourites" : "Add to Favourites") { store.toggleFavourite(item) }
@@ -167,6 +181,40 @@ struct PosterCard: View {
             if let m = extraMenu { m() }
         }
         .help(item.name)
+    }
+}
+
+extension PosterCard {
+    /// After a moment on the card it widens; a moment later the preview starts. Off the card: back.
+    @MainActor fileprivate func schedulePeek(_ on: Bool) {
+        peekTask?.cancel()
+        peekTask = nil
+        guard on, store.homePreviews, item.kind == .movie || item.kind == .series || item.kind == .episode else {
+            if widened { withAnimation(Theme.ease) { widened = false } }
+            store.stopPagePreview(owner: item.id)
+            return
+        }
+        let it = item
+        peekTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if Task.isCancelled { return }
+            withAnimation(Theme.ease) { widened = true }
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            if Task.isCancelled { return }
+            await store.startCardPreview(it)
+        }
+    }
+}
+
+/// The muted preview's picture, faded in once it's actually playing.
+struct PagePreviewLayer: View {
+    @ObservedObject var preview: PlayerModel
+
+    var body: some View {
+        VideoSurface(video: preview.video)
+            .opacity(preview.playing ? 1 : 0)
+            .animation(.easeInOut(duration: 0.5), value: preview.playing)
+            .allowsHitTesting(false)
     }
 }
 

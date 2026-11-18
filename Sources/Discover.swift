@@ -154,5 +154,8 @@ struct Segments {
 struct RecRow: Identifiable {
     let title: String
     let items: [Item]
+    /// What it's based on ("Because you watched X"), so it can be turned off; nil for others.
+    var sourceId: String? = nil
+    var sourceName: String? = nil
     var id: String { title }
 }

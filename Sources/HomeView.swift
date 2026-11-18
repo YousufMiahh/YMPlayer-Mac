@@ -111,28 +111,30 @@ struct HomeView: View {
                 }
 
                 ForEach(recs) { row in
-                    Shelf(title: row.title) {
+                    Shelf(title: row.title, subtitle: row.sourceId == nil ? nil : "right-click for options") {
                         ForEach(row.items) { it in
-                            PosterCard(item: it, width: 150, subtitle: it.kind == .series ? (it.genre ?? "Series") : it.rating) { store.open(it) }
+                            PosterCard(item: it, width: 150, subtitle: it.kind == .series ? (it.genre ?? "Series") : it.rating, peek: true,
+                                       action: { store.open(it) },
+                                       extraMenu: recMenu(row))
                         }
                     }
                 }
 
                 if !favVod.isEmpty {
                     Shelf(title: "My Favourites") {
-                        ForEach(favVod) { it in PosterCard(item: it, width: 150, subtitle: it.kind == .series ? "Series" : it.rating) { store.open(it) } }
+                        ForEach(favVod) { it in PosterCard(item: it, width: 150, subtitle: it.kind == .series ? "Series" : it.rating, peek: true) { store.open(it) } }
                     }
                 }
 
                 if !newMovies.isEmpty {
                     Shelf(title: "Recently Added Movies") {
-                        ForEach(newMovies) { it in PosterCard(item: it, width: 150, subtitle: it.rating) { store.open(it) } }
+                        ForEach(newMovies) { it in PosterCard(item: it, width: 150, subtitle: it.rating, peek: true) { store.open(it) } }
                     }
                 }
 
                 if !newSeries.isEmpty {
                     Shelf(title: "Recently Added Series") {
-                        ForEach(newSeries) { it in PosterCard(item: it, width: 150, subtitle: it.genre) { store.open(it) } }
+                        ForEach(newSeries) { it in PosterCard(item: it, width: 150, subtitle: it.genre, peek: true) { store.open(it) } }
                     }
                 }
             }
@@ -160,7 +162,16 @@ struct HomeView: View {
         .padding(.horizontal, 28)
     }
 
-    private func resume(_ p: WatchProgress) {
+    /// Right-click on a "Because you watched X" card: stop basing rows on X.
+    private func recMenu(_ row: RecRow) -> (() -> AnyView)? {
+        guard row.sourceId != nil else { return nil }
+        let name = row.sourceName ?? "This"
+        return {
+            AnyView(Button("Don't Recommend Based on " + name) { store.blockRecommendations(row) })
+        }
+    }
+
+        private func resume(_ p: WatchProgress) {
         if p.item.kind == .episode {
             // Open the series so the rest of the episodes are there for "next episode"
             if let sid = p.item.seriesId, let s = store.items[.series]?.first(where: { $0.streamId == sid }) {

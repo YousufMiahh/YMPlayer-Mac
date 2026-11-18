@@ -157,6 +157,7 @@ struct UserData: Codable {
     var catNames: [String: String] = [:]    // "kind:categoryId" → your own name
     var recentVOD: [Item] = []              // films and episodes you've played, newest first
     var picture: [String: Int] = [:]        // picture shape per channel / film / series (see PictureMode)
+    var recBlocked: Set<String> = []        // "Don't recommend based on this": ids kept out of Because you watched
 
     init() {}
 
@@ -175,6 +176,7 @@ struct UserData: Codable {
         catNames = try c.decodeIfPresent([String: String].self, forKey: .catNames) ?? [:]
         recentVOD = try c.decodeIfPresent([Item].self, forKey: .recentVOD) ?? []
         picture = try c.decodeIfPresent([String: Int].self, forKey: .picture) ?? [:]
+        recBlocked = try c.decodeIfPresent(Set<String>.self, forKey: .recBlocked) ?? []
     }
 }
 

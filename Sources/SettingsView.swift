@@ -74,6 +74,7 @@ struct SettingsView: View {
     @EnvironmentObject var dl: Downloader
     @AppStorage("liveFormat") private var liveFormat = "ts"
     @AppStorage("previewMode") private var previewMode = 2
+    @AppStorage("homePreviews") private var homePreviews = true
     @AppStorage("appearance") private var appearance = 0
     @AppStorage("homeRowsVersion") private var homeRowsVersion = 0
     @AppStorage("subSize") private var subSize = 1
@@ -131,6 +132,20 @@ struct SettingsView: View {
                         UserDefaults.standard.set($0, forKey: "home." + r.key)
                         homeRowsVersion += 1
                     }))
+                }
+                Toggle("Film & series previews", isOn: $homePreviews)
+                Text("Rest the pointer on a film or series on Home and it plays a muted preview; something you're part way through plays behind its page.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !store.data.recBlocked.isEmpty {
+                    HStack {
+                        Text("Because You Watched: \(store.data.recBlocked.count) turned off")
+                        Spacer()
+                        Button("Bring Back") {
+                            store.data.recBlocked = []
+                            Task { await store.loadRecs() }
+                        }
+                    }
                 }
             }
 

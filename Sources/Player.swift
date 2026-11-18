@@ -136,6 +136,7 @@ final class PlayerModel: ObservableObject {
         }
         frozenSince = nil
         lastPictures = -1
+        languagesApplied = false
         let m = VLCMedia(url: url)
         m.addOption(":http-user-agent=\(XtreamAPI.userAgent)")
         m.addOption(":network-caching=\(isLive ? 2000 : 4000)")
@@ -209,7 +210,36 @@ final class PlayerModel: ObservableObject {
         let e = st == .ended && !isLive
         if e != ended { ended = e }
         if p { retries = 0 }
+        if p && !languagesApplied && t > 1.5 { applyLanguages() }
         checkFrozen(playing: p, buffering: b)
+    }
+
+    // MARK: Audio & Subtitles (chosen on the film / series page)
+
+    /// "" = as the stream sets it, "off" = no subtitles, "en" = English when there is some.
+    static var subtitleLanguage: String { UserDefaults.standard.string(forKey: "subLang") ?? "" }
+    /// "" = as the stream sets it, "en" = English when there is some.
+    static var audioLanguage: String { UserDefaults.standard.string(forKey: "audioLang") ?? "" }
+    private var languagesApplied = false
+
+    private static func isEnglish(_ name: String) -> Bool {
+        let l = name.lowercased()
+        return l.contains("english") || l.contains("eng") || l.contains("[en]") || l.hasPrefix("en ")
+    }
+
+    /// Once the tracks are known: the languages picked under Audio & Subtitles.
+    private func applyLanguages() {
+        languagesApplied = true
+        let sub = PlayerModel.subtitleLanguage, aud = PlayerModel.audioLanguage
+        if sub == "off" {
+            if vlc.currentVideoSubTitleIndex != -1 { vlc.currentVideoSubTitleIndex = -1 }
+        } else if sub == "en", let t = subtitleTracks.first(where: { $0.id >= 0 && PlayerModel.isEnglish($0.name) }) {
+            vlc.currentVideoSubTitleIndex = t.id
+        }
+        if aud == "en", let t = audioTracks.first(where: { $0.id >= 0 && PlayerModel.isEnglish($0.name) }), t.id != vlc.currentAudioTrackIndex {
+            vlc.currentAudioTrackIndex = t.id
+        }
+        objectWillChange.send()
     }
 
     // MARK: frozen picture

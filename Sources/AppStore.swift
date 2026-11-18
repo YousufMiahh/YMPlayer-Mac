@@ -562,6 +562,7 @@ final class AppStore: ObservableObject {
         saveCurrentProgress()
         if cast.isCasting { cast.stop(resumeHere: false) } // something else chosen: back on the Mac
         preview.stop()
+        pagePreviewOwner = nil
         var at = start ?? 0
         if start == nil, it.kind != .live, let p = data.progress[it.id], p.position > 30, p.fraction < 0.95 { at = p.position }
         if session?.item.id != it.id { endRetries = 0 }
@@ -607,6 +608,7 @@ final class AppStore: ObservableObject {
                 s.tmdb = h.tmdb
                 src = s
             } else { src = h }
+            if data.recBlocked.contains(src.id) { continue } // "Don't recommend based on this"
             if seen.insert(src.id).inserted { sources.append(src) }
         }
         guard !sources.isEmpty else { recRows = []; return }
@@ -626,7 +628,8 @@ final class AppStore: ObservableObject {
                 if keep.count >= 20 { break }
             }
             let name = Tmdb.clean(src.name).name
-            if keep.count >= 3 { rows.append(RecRow(title: "Because you watched " + (name.isEmpty ? src.name : name), items: keep)) }
+            let shownName = name.isEmpty ? src.name : name
+            if keep.count >= 3 { rows.append(RecRow(title: "Because you watched " + shownName, items: keep, sourceId: src.id, sourceName: shownName)) }
         }
         if rows.isEmpty { // nothing from TMDB: series sharing a genre with what you watch, best rated first
             let picks = byGenre(sources, series)
@@ -634,6 +637,57 @@ final class AppStore: ObservableObject {
         }
         guard account == currentId else { return } // switched account meanwhile
         recRows = rows
+    }
+
+    /// "Don't recommend based on this": that row goes, and the next thing you watched takes its place.
+    func blockRecommendations(_ row: RecRow) {
+        guard let id = row.sourceId else { return }
+        data.recBlocked.insert(id)
+        recRows.removeAll { $0.id == row.id }
+        show("You won't see recommendations based on " + (row.sourceName ?? "that"))
+        Task { await loadRecs() }
+    }
+
+    // MARK: previews (Netflix-style)
+
+    /// Settings → Film & Series Previews: the page behind Resume and Home's cards play (muted).
+    var homePreviews: Bool { UserDefaults.standard.object(forKey: "homePreviews") as? Bool ?? true }
+    /// What the muted preview is playing for (a film / series page, or a Home card), if anything.
+    @Published var pagePreviewOwner: String?
+
+    /// Plays `it` muted from `at` seconds, on the preview player, for `owner`.
+    func startPagePreview(_ it: Item, at: Double, owner: String) {
+        guard homePreviews, session == nil, let url = api?.playURL(it, liveFormat: liveFormat) else { return }
+        preview.muted = true
+        preview.play(url: url, start: at, live: false)
+        pagePreviewOwner = owner
+    }
+
+    func stopPagePreview(owner: String? = nil) {
+        guard let o = pagePreviewOwner, owner == nil || owner == o else { return }
+        pagePreviewOwner = nil
+        preview.stop()
+    }
+
+    /// A Home card: the film (from where you were, or a few minutes in), or the series' episode you
+    /// were on (or its first).
+    func startCardPreview(_ it: Item) async {
+        switch it.kind {
+        case .movie, .episode:
+            let p = data.progress[it.id]?.position ?? 0
+            startPagePreview(it, at: p > 0 ? p : (it.kind == .movie ? 300 : 180), owner: it.id)
+        case .series:
+            if let lw = data.progress.values.filter({ $0.item.seriesId == it.streamId }).max(by: { $0.updated < $1.updated }) {
+                startPagePreview(lw.item, at: lw.position > 0 ? lw.position : 180, owner: it.id)
+                return
+            }
+            guard let info = try? await api?.seriesInfo(it) else { return }
+            let eps = info.allEpisodes
+            guard let first = eps.first(where: { ($0.season ?? 1) > 0 }) ?? eps.first else { return }
+            startPagePreview(first, at: 180, owner: it.id)
+        default:
+            return
+        }
     }
 
     /// The "Recommended for You" fallback, as on the TV and phone.
