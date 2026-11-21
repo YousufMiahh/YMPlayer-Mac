@@ -277,6 +277,9 @@ struct ChannelCard: View {
         .contextMenu {
             Button("Watch") { action() }
             Button(store.isFavourite(item) ? "Remove from Favourites" : "Add to Favourites") { store.toggleFavourite(item) }
+            if store.data.recentChannels.contains(where: { $0.id == item.id }) {
+                Button("Remove from Recently Watched") { store.removeRecent(item) }
+            }
         }
         .help(item.name)
     }

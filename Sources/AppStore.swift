@@ -437,6 +437,9 @@ final class AppStore: ObservableObject {
         if data.favCategories.contains(key) { data.favCategories.remove(key) } else { data.favCategories.insert(key) }
     }
 
+    /// Takes one channel off Recently Watched (synced to your other devices).
+    func removeRecent(_ it: Item) { data.recentChannels.removeAll { $0.id == it.id } }
+
     func addRecent(_ it: Item) {
         data.recentChannels.removeAll { $0.id == it.id }
         data.recentChannels.insert(it, at: 0)

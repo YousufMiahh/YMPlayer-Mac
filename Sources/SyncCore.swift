@@ -23,6 +23,8 @@ enum SyncCore {
                        "catname", "queue", "pic", "adelay", "settings"]
     static let tombstoneMs: Int64 = 60 * 86_400_000
     static let histKeep = 60, histShow = 40, rounds: UInt32 = 10000
+    /// Every app keeps at least this many of each history (the Mac keeps 30 channels).
+    static let histSure = 30
 
     // MARK: keys and encryption
 
@@ -173,6 +175,15 @@ enum SyncCore {
                 hist[k] = e
                 prev = num(e["t"])
             }
+            // gone from this list while plenty newer stayed? Pushed off its end. Otherwise: taken off by hand
+            if !mine.isEmpty {
+                let kept = mine.map { num((hist[$0] as? J)?["t"]) }
+                for (k, v) in oldHist {
+                    let s = v as? J ?? J()
+                    if histKind(k) != kind || s["x"] != nil || sh[k] != nil || num(s["t"]) <= num(clear[kind]) { continue }
+                    if kept.filter({ $0 > num(s["t"]) }).count < histSure { hist[k] = ["x": 1, "t": now] as J }
+                }
+            }
             if mine.isEmpty {
                 let had = oldHist.contains { k, v in
                     let s = v as? J ?? J()
@@ -231,10 +242,17 @@ enum SyncCore {
         var h = map(out, "hist")
         let rh = map(remote, "hist")
         for kind in ["live", "vod"] {
-            let ks = h.keys.filter { histKind($0) == kind }.sorted { num((h[$0] as? J)?["t"]) > num((h[$1] as? J)?["t"]) }
+            let ks = h.keys.filter { histKind($0) == kind && (h[$0] as? J)?["x"] == nil }
+                .sorted { num((h[$0] as? J)?["t"]) > num((h[$1] as? J)?["t"]) }
             for (idx, k) in ks.enumerated() {
                 let e = h[k] as? J ?? J()
-                if e["x"] != nil || num(e["t"]) <= num(hc[kind]) || idx >= histKeep { h[k] = nil; if rh[k] != nil { dirty = true } }
+                if num(e["t"]) <= num(hc[kind]) || idx >= histKeep { h[k] = nil; if rh[k] != nil { dirty = true } }
+            }
+            for (k, v) in h { // removals: kept a while so they spread, then dropped
+                let e = v as? J ?? J()
+                if histKind(k) == kind, e["x"] != nil, num(e["t"]) < now - tombstoneMs || num(e["t"]) <= num(hc[kind]) {
+                    h[k] = nil; if rh[k] != nil { dirty = true }
+                }
             }
         }
         out["hist"] = h

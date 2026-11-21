@@ -94,6 +94,9 @@ struct LiveView: View {
                     if let id = ids.first, let ch = list.first(where: { $0.id == id }) {
                         Button("Watch") { play(ch) }
                         Button(store.isFavourite(ch) ? "Remove from Favourites" : "Add to Favourites") { store.toggleFavourite(ch) }
+                        if store.data.recentChannels.contains(where: { $0.id == ch.id }) {
+                            Button("Remove from Recently Watched") { store.removeRecent(ch) }
+                        }
                     }
                 } primaryAction: { ids in
                     if let id = ids.first, let ch = list.first(where: { $0.id == id }) { play(ch) }

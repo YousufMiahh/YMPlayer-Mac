@@ -40,4 +40,9 @@ let ss = SyncCore.stamp(st(["settings": ["sub_bg": ["v": true] as J] as J]), sha
 check(SyncCore.num(((ss["settings"] as! J)["home_fav_movie"] as! J)["t"]) == 5, "keeps settings this app lacks")
 check(SyncCore.num(((ss["settings"] as! J)["sub_bg"] as! J)["t"]) == 5, "Bool and JSON true are the same")
 check(SyncCore.canon(1) != SyncCore.canon(true), "1 is not true")
+let h3 = SyncCore.stamp(st(["hist": ["live:1": ["o": 0, "i": J()] as J, "live:2": ["o": 1, "i": J()] as J, "live:3": ["o": 2, "i": J()] as J] as J]), shadow: nil, now: 1000, maps: all)
+let r3 = SyncCore.stamp(st(["hist": ["live:1": ["o": 0, "i": J()] as J, "live:3": ["o": 1, "i": J()] as J] as J]), shadow: h3, now: 2000, maps: all)
+check(((r3["hist"] as! J)["live:2"] as! J)["x"] != nil, "channel removal stamped")
+let o3 = SyncCore.merge(r3, h3, now: 2000).doc
+check((SyncCore.toState(o3)["hist"] as! J)["live:2"] == nil && (o3["hist"] as! J)["live:2"] != nil, "removal spreads and is kept")
 print("SyncCore OK")

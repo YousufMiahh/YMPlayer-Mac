@@ -1,2 +1,3 @@
 - Sync with your other devices: favourites, Continue Watching, watched, your queue, recently watched channels, favourite, hidden and renamed categories, picture shape, subtitle style and languages and your Home rows now follow you between your Mac, Fire TV, phone and Samsung TV when they use the same login, usually within seconds. It's encrypted on the Mac, so the sync server can't see your login or what you watch. Settings → Sync to turn it off or sync now.
 - Film and series pages show the title's logo, like Netflix. On a series, scroll the episodes and the top shrinks into a bar with a small logo.
+- Recent Channels: take a channel off the list one at a time (right-click it, on Home or in Live TV → Recently Watched). It comes off your other devices too.
