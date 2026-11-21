@@ -2,3 +2,4 @@
 - Film and series pages show the title's logo, like Netflix. On a series, scroll the episodes and the top shrinks into a bar with a small logo.
 - Recent Channels: take a channel off the list one at a time (right-click it, on Home or in Live TV → Recently Watched). It comes off your other devices too.
 - Home: point at a film or series and it widens straight away, showing its picture and logo, and starts a preview almost at once.
+- A new launch intro: "YOUSUF MIAH" folds away into its Y and M, which land in the logo.
