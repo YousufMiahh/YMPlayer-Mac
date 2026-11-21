@@ -144,7 +144,7 @@ struct WatchProgress: Codable, Hashable {
 }
 
 /// Everything remembered per account.
-struct UserData: Codable {
+struct UserData: Codable, Equatable {
     var favourites: [Item] = []
     var favCategories: Set<String> = []     // "kind:categoryId"
     var hiddenCategories: Set<String> = []  // hidden by you

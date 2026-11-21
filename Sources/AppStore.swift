@@ -59,7 +59,7 @@ final class AppStore: ObservableObject {
     @Published var items: [Kind: [Item]] = [:]
     @Published var loading: Set<Kind> = []
     @Published var loadError: [Kind: String] = [:]
-    @Published var data = UserData() { didSet { scheduleSave() } }
+    @Published var data = UserData() { didSet { scheduleSave(); sync.changed(from: oldValue, to: data) } }
     @Published var filterVersion = 0
     @Published var top10Films: [Item] = []
     @Published var top10Series: [Item] = []
@@ -76,6 +76,7 @@ final class AppStore: ObservableObject {
     let guide = EpgStore()
     let downloads = Downloader()
     let cast = CastController()
+    let sync = SyncService()
 
     private var saveTask: Task<Void, Never>?
     private var bag = Set<AnyCancellable>()
@@ -93,6 +94,7 @@ final class AppStore: ObservableObject {
         guide.apiProvider = { [weak self] in self?.api }
         downloads.apiProvider = { [weak self] in self?.api }
         cast.store = self
+        sync.start(self)
         downloads.setAccount(currentId)
         loadUserData()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in

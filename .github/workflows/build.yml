@@ -19,6 +19,11 @@ jobs:
           which xcodegen || brew install xcodegen
           xcodebuild -version
 
+      - name: Sync format check (same as the other apps)
+        run: |
+          cat Sources/SyncCore.swift Tools/synccheck.swift > /tmp/synccheck.swift
+          swift /tmp/synccheck.swift
+
       - name: Generate project
         run: |
           xcodegen generate

@@ -95,7 +95,7 @@ struct MovieDetail: View {
             HStack(alignment: .top, spacing: 30) {
                 PosterCard(item: item, width: 230, showTitle: false) {}
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(item.name).font(.system(size: 30, weight: .bold)).lineLimit(3)
+                    TitleLogo(kind: .movie, name: item.name, tmdb: item.tmdb ?? info?.tmdb, height: 110, font: .system(size: 30, weight: .bold))
                     if !meta.isEmpty { Text(meta).foregroundStyle(.secondary) }
                     if let p = info?.plot ?? item.plot {
                         ScrollView {
@@ -185,6 +185,9 @@ struct SeriesDetail: View {
     @State private var trailer: String?
 
     @State private var scrollTarget: String?
+    /// How far the episode list is scrolled: the header shrinks into a bar with the small logo.
+    @State private var scrolled: CGFloat = 0
+    private var collapse: CGFloat { min(1, max(0, scrolled / 150)) }
 
     private var lastWatched: WatchProgress? {
         store.data.progress.values.filter { $0.item.seriesId == item.streamId }.max { $0.updated < $1.updated }
@@ -223,7 +226,7 @@ struct SeriesDetail: View {
                 HStack(alignment: .top, spacing: 26) {
                     PosterCard(item: item, width: 150, showTitle: false) {}
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(info?.name ?? item.name).font(.system(size: 28, weight: .bold)).lineLimit(2)
+                        TitleLogo(kind: .tv, name: info?.name ?? item.name, tmdb: info?.tmdb ?? item.tmdb, height: 92)
                         let meta = [info?.releaseDate.map { String($0.prefix(4)) }, info?.rating ?? item.rating, info?.genre ?? item.genre,
                                     info.map { "\($0.seasons.count) season" + ($0.seasons.count == 1 ? "" : "s") }].compactMap { $0 }
                         if !meta.isEmpty { Text(meta.joined(separator: "   ·   ")).foregroundStyle(.secondary) }
@@ -263,9 +266,20 @@ struct SeriesDetail: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(30)
+                .opacity(1 - min(1, collapse * 1.6))
+                .allowsHitTesting(collapse < 0.5)
+                if collapse > 0 { // the bar it shrinks into: the small logo, centred
+                    TitleLogo(kind: .tv, name: info?.name ?? item.name, tmdb: info?.tmdb ?? item.tmdb, height: 40, maxWidth: 260,
+                              font: .system(size: 18, weight: .bold), alignment: .center)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.horizontal, 70)
+                        .opacity(collapse)
+                        .scaleEffect(0.85 + 0.15 * collapse)
+                }
                 CloseButton()
             }
-            .frame(height: 300)
+            .frame(height: 300 - 220 * collapse)
+            .clipped()
 
             if let info = info {
                 let seasons = info.seasons.keys.sorted()
@@ -302,6 +316,10 @@ struct SeriesDetail: View {
                     ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 8) {
+                            GeometryReader { g in
+                                Color.clear.preference(key: EpisodeScrollKey.self, value: -g.frame(in: .named("episodes")).minY)
+                            }
+                            .frame(height: 0)
                             ForEach(eps) { ep in
                                 EpisodeRow(episode: ep, progress: store.data.progress[ep.id], watched: store.isWatched(ep),
                                            downloaded: store.downloads.entry(ep)?.state == .done) { play(ep) }
@@ -332,6 +350,8 @@ struct SeriesDetail: View {
                         .padding(.horizontal, 24)
                         .padding(.bottom, 20)
                     }
+                    .coordinateSpace(name: "episodes")
+                    .onPreferenceChange(EpisodeScrollKey.self) { scrolled = $0 }
                     .onAppear { if let id = scrollTarget { proxy.scrollTo(id, anchor: .top) } }
                     .onChange(of: scrollTarget) { id in
                         if let id = id { withAnimation(Theme.ease) { proxy.scrollTo(id, anchor: .top) } }
@@ -462,3 +482,10 @@ struct EpisodeRow: View {
 }
 
 struct TrailerID: Identifiable { let id: String }
+
+
+/// How far the episode list has scrolled (SeriesDetail's header follows it).
+private struct EpisodeScrollKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}

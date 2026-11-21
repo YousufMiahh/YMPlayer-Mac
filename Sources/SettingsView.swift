@@ -117,6 +117,8 @@ struct SettingsView: View {
                 Button("Add Account…") { showAdd = true }
             }
 
+            SyncSettings(sync: store.sync)
+
             Section("Appearance") {
                 Picker("Theme", selection: $appearance) {
                     Text("Match my Mac").tag(0)
@@ -347,5 +349,26 @@ struct HiddenSheet: View {
         .padding(22)
         .frame(width: 560, height: 640)
         .onAppear { rows = store.hiddenCategoryList() }
+    }
+}
+
+
+/// Settings › Sync: on / off, and when it last synced.
+struct SyncSettings: View {
+    @ObservedObject var sync: SyncService
+
+    var body: some View {
+        Section("Sync") {
+            Toggle("Sync with your other devices", isOn: Binding(get: { sync.enabled }, set: { sync.enabled = $0 }))
+            HStack {
+                Text(sync.label).foregroundStyle(.secondary)
+                Spacer()
+                Button("Sync Now") { sync.now() }
+                    .disabled(!sync.configured || !sync.enabled || sync.syncing)
+            }
+            Text("Favourites, Continue Watching, watched, your queue and hidden or renamed categories follow you to your Fire TV, phone and Samsung TV when they use the same login. It's encrypted on this Mac: the sync server can't see your login or what you watch.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }

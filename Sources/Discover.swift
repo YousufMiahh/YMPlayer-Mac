@@ -80,6 +80,33 @@ enum Tmdb {
         return id
     }
 
+    /// The title's logo (the artwork Netflix and Apple TV show instead of the name): English first,
+    /// then one without words; remembered per title (in memory and between launches).
+    static func logo(_ kind: Kind, id: String) async -> URL? {
+        let ck = "tmdbLogo.\(kind.rawValue).\(id)"
+        if let hit = UserDefaults.standard.string(forKey: ck) { return hit.isEmpty ? nil : URL(string: hit) }
+        guard let o = try? await get("/\(kind.rawValue)/\(id)/images?include_image_language=en,null") else { return nil }
+        let u = pickLogo(o["logos"] as? [[String: Any]] ?? [])
+        UserDefaults.standard.set(u ?? "", forKey: ck)
+        return u.flatMap { URL(string: $0) }
+    }
+
+    static func pickLogo(_ logos: [[String: Any]]) -> String? {
+        func rank(_ l: [String: Any]) -> Int {
+            let lang = l["iso_639_1"] as? String ?? ""
+            return lang == "en" ? 0 : lang.isEmpty ? 1 : 9
+        }
+        var best: [String: Any]? = nil
+        for l in logos where (l["file_path"] as? String ?? "") != "" && rank(l) < 9 {
+            guard let b = best else { best = l; continue }
+            let v = (l["vote_average"] as? NSNumber)?.doubleValue ?? 0, bv = (b["vote_average"] as? NSNumber)?.doubleValue ?? 0
+            if rank(l) < rank(b) || (rank(l) == rank(b) && v > bv) { best = l }
+        }
+        guard var path = best?["file_path"] as? String else { return nil }
+        if path.lowercased().hasSuffix(".svg") { path = String(path.dropLast(4)) + ".png" }
+        return "https://image.tmdb.org/t/p/w500" + path
+    }
+
     /// Titles TMDB recommends to people who liked this (English and original titles).
     static func recommendations(_ kind: Kind, id: String) async -> [String] {
         var out: [String] = []
