@@ -30,7 +30,7 @@ final class Updater: ObservableObject {
     func check(manual: Bool) {
         guard !busy else { return }
         let d = UserDefaults.standard
-        if !manual, Date().timeIntervalSince1970 - d.double(forKey: "updateChecked") < 3 * 3600 { return }
+        if !manual, Date().timeIntervalSince1970 - d.double(forKey: "updateChecked") < 60 { return } // every launch
         busy = true
         Task {
             defer { busy = false }

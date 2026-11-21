@@ -67,9 +67,13 @@ struct RootView: View {
         }
         .overlay(alignment: .bottom) { UpdateBanner(updater: Updater.shared) }
         .task {
-            // New version on GitHub? Once things have settled (not over the What's New or the tour)
+            // New version on GitHub? Every launch, once things have settled: after the What's New
+            // or the tour is closed, and not while something's playing (checked for up to 10 minutes)
             try? await Task.sleep(nanoseconds: 4_000_000_000)
-            if store.whatsNew == nil && !store.showTour && store.session == nil { Updater.shared.check(manual: false) }
+            for _ in 0..<200 {
+                if store.whatsNew == nil && !store.showTour && store.session == nil { Updater.shared.check(manual: false); break }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
         }
         .tint(Theme.accent)
         .background(WindowFinder())
