@@ -41,8 +41,9 @@ final class SyncService: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.now() }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.now() }
+        // another device's changes show within half a minute while YM Player is in front
+        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in if NSApp.isActive { self?.now() } }
         }
         soon(1.5)
     }
@@ -52,7 +53,8 @@ final class SyncService: ObservableObject {
         if applying { return }
         var o = old
         o.progress = new.progress
-        if o == new { later() } else { soon(4) } // only resume points (while playing): at most every 20 s
+        let removed = old.progress.keys.contains { new.progress[$0] == nil } // taken off Continue Watching
+        if o == new && !removed { later() } else { soon(4) } // only resume points (while playing): at most every 20 s
     }
 
     func soon(_ seconds: Double) {
@@ -67,10 +69,8 @@ final class SyncService: ObservableObject {
 
     func later() { if pending == nil { soon(20) } }
 
-    func resumed() {
-        if let last = lastOk, Date().timeIntervalSince(last) < 60 { return }
-        soon(0.5)
-    }
+    /// The app came to the front: get what other devices changed straight away.
+    func resumed() { soon(0.3) }
 
     // MARK: status
 
