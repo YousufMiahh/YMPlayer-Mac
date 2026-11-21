@@ -20,7 +20,7 @@ enum SyncCore {
     typealias J = [String: Any]
 
     static let maps = ["pos", "up", "watched", "fav", "favcat", "hidecat", "showcat", "hidetag", "recblock",
-                       "catname", "queue", "pic", "adelay"]
+                       "catname", "queue", "pic", "adelay", "settings"]
     static let tombstoneMs: Int64 = 60 * 86_400_000
     static let histKeep = 60, histShow = 40, rounds: UInt32 = 10000
 
@@ -113,11 +113,22 @@ enum SyncCore {
         case "catname": return (a["n"] as? String ?? "") == (b["n"] as? String ?? "")
         case "pic": return num(a["m"]) == num(b["m"])
         case "adelay": return num(a["ms"]) == num(b["ms"])
+        case "settings": return canon(a["v"]) == canon(b["v"])
         default: return true
         }
     }
 
     private static func map(_ d: J, _ m: String) -> J { d[m] as? J ?? J() }
+
+    /// A setting's value as text, so true from JSON and a Swift Bool compare equal (and 1 ≠ true).
+    static func canon(_ v: Any?) -> String {
+        if let n = v as? NSNumber {
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { return n.boolValue ? "true" : "false" }
+            return n.stringValue
+        }
+        if let s = v as? String { return "\"" + s + "\"" }
+        return "null"
+    }
 
     /// This device's data as a document: unchanged since the last sync keeps its time, changed gets
     /// now, gone becomes a removal. `maps`: the maps this app keeps (others pass through).
@@ -139,7 +150,7 @@ enum SyncCore {
             }
             for (k, v) in old where res[k] == nil {
                 let s = v as? J ?? J()
-                res[k] = s["x"] != nil ? s : (["x": 1, "t": now] as J)
+                res[k] = s["x"] != nil || m == "settings" ? s : (["x": 1, "t": now] as J) // settings: one this app doesn't have
             }
             out[m] = res
         }

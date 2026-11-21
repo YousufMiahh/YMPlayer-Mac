@@ -22,6 +22,7 @@ final class SyncService: ObservableObject {
     private var pending: Task<Void, Never>?
     private var applying = false
     private var timer: Timer?
+    private var settingsPrint = ""
 
     var configured: Bool { !SyncService.url.isEmpty && !SyncService.key.isEmpty }
     var enabled: Bool {
@@ -42,6 +43,14 @@ final class SyncService: ObservableObject {
             Task { @MainActor in self?.now() }
         }
         // another device's changes show within half a minute while YM Player is in front
+        settingsPrint = SyncService.settingsFingerprint()
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                let f = SyncService.settingsFingerprint()
+                if f != self.settingsPrint { self.settingsPrint = f; self.soon(4) } // subtitle style, languages, Home rows
+            }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in if NSApp.isActive { self?.now() } }
         }
@@ -212,6 +221,49 @@ final class SyncService: ObservableObject {
         return it
     }
 
+    // MARK: settings shared too (subtitle style and languages, Home rows)
+
+    /// Shared name → this Mac's UserDefaults key.
+    static var settingKeys: [String: String] {
+        var m = ["sub_size": "subSize", "sub_color": "subColour", "sub_bg": "subBackground", "sub_bg_opacity": "subOpacity",
+                 "sub_lang": "subLang", "audio_lang": "audioLang"]
+        for r in HomeRows.all { m["home_" + r.key] = "home." + r.key }
+        return m
+    }
+
+    /// Only ones set on this Mac (a default here mustn't replace a choice made on another device).
+    static func readSettings() -> J {
+        var out = J()
+        let d = UserDefaults.standard
+        for (name, key) in settingKeys {
+            guard let v = d.object(forKey: key) else { continue }
+            if name == "sub_bg" || name.hasPrefix("home_") { out[name] = ["v": (v as? Bool) ?? ((v as? NSNumber)?.boolValue ?? false)] as J }
+            else if name == "sub_lang" || name == "audio_lang" { out[name] = ["v": v as? String ?? ""] as J }
+            else { out[name] = ["v": (v as? NSNumber)?.intValue ?? 0] as J }
+        }
+        return out
+    }
+
+    /// A snapshot to notice changes made in Settings (UserDefaults has no per-key notice).
+    static func settingsFingerprint() -> String {
+        let d = UserDefaults.standard
+        return settingKeys.values.sorted().map { "\($0)=\(String(describing: d.object(forKey: $0)))" }.joined(separator: ";")
+    }
+
+    private func writeSettings(_ next: J, _ prev: J) {
+        let d = UserDefaults.standard
+        var homeChanged = false
+        for (name, key) in SyncService.settingKeys {
+            guard let e = next[name] as? J, let v = e["v"], !(v is NSNull) else { continue }
+            if let p = prev[name] as? J, SyncCore.canon(p["v"]) == SyncCore.canon(v) { continue }
+            if name == "sub_bg" || name.hasPrefix("home_") { d.set((v as? NSNumber)?.boolValue ?? false, forKey: key); homeChanged = homeChanged || name.hasPrefix("home_") }
+            else if name == "sub_lang" || name == "audio_lang" { d.set(v as? String ?? "", forKey: key) }
+            else { d.set((v as? NSNumber)?.intValue ?? 0, forKey: key) }
+        }
+        if homeChanged { d.set(d.integer(forKey: "homeRowsVersion") + 1, forKey: "homeRowsVersion") }
+        settingsPrint = SyncService.settingsFingerprint()
+    }
+
     /// Mac picture keys: episodes share "series:<id>"; the shared format says "series_<id>".
     private static func picOut(_ k: String) -> String { k.hasPrefix("series:") ? "series_" + k.dropFirst(7) : k }
     private static func picIn(_ k: String) -> String { k.hasPrefix("series_") ? "series:" + k.dropFirst(7) : k }
@@ -238,6 +290,7 @@ final class SyncService: ObservableObject {
         st["watched"] = set(d.watched); st["favcat"] = set(d.favCategories); st["hidecat"] = set(d.hiddenCategories)
         st["showcat"] = set(d.alwaysShown); st["hidetag"] = set(d.hiddenTags); st["recblock"] = set(d.recBlocked)
         st["catname"] = names; st["pic"] = pic
+        st["settings"] = SyncService.readSettings()
         return st
     }
 
@@ -288,6 +341,7 @@ final class SyncService: ObservableObject {
             for (k, v) in next["pic"] as? J ?? [:] { let m = Int(SyncCore.num((v as? J)?["m"])); if m > 0 { p[SyncService.picIn(k)] = m } }
             d.picture = p
         }
+        if diff.contains("settings") { writeSettings(next["settings"] as? J ?? [:], prev["settings"] as? J ?? [:]) }
         if diff.contains("hist") {
             let h = sorted(next["hist"] as? J ?? [:])
             d.recentChannels = h.filter { $0.0.hasPrefix("live:") }.compactMap { SyncService.item($0.1["i"]) }

@@ -366,7 +366,7 @@ struct SyncSettings: View {
                 Button("Sync Now") { sync.now() }
                     .disabled(!sync.configured || !sync.enabled || sync.syncing)
             }
-            Text("Favourites, Continue Watching, watched, your queue and hidden or renamed categories follow you to your Fire TV, phone and Samsung TV when they use the same login. It's encrypted on this Mac: the sync server can't see your login or what you watch.")
+            Text("Favourites, Continue Watching, watched, your queue, categories, subtitle style and Home rows follow you to your Fire TV, phone and Samsung TV when they use the same login. It's encrypted on this Mac: the sync server can't see your login or what you watch.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

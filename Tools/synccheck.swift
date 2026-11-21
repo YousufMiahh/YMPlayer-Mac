@@ -35,4 +35,9 @@ let js = "{\"v\":1,\"histclear\":{\"live\":0,\"vod\":0},\"hist\":{\"movie:9\":{\
 let jd = try! JSONSerialization.jsonObject(with: Data(js.utf8)) as! J
 let jst = SyncCore.toState(jd)
 check(SyncCore.num(((jst["pos"] as! J)["movie:9"] as! J)["p"]) == 1234 && (jst["hist"] as! J)["movie:9"] != nil, "reads JS doc")
+var sd = SyncCore.emptyDoc(); sd["settings"] = ["home_fav_movie": ["v": false, "t": 5] as J, "sub_bg": ["v": true, "t": 5] as J] as J
+let ss = SyncCore.stamp(st(["settings": ["sub_bg": ["v": true] as J] as J]), shadow: sd, now: 10, maps: all)
+check(SyncCore.num(((ss["settings"] as! J)["home_fav_movie"] as! J)["t"]) == 5, "keeps settings this app lacks")
+check(SyncCore.num(((ss["settings"] as! J)["sub_bg"] as! J)["t"]) == 5, "Bool and JSON true are the same")
+check(SyncCore.canon(1) != SyncCore.canon(true), "1 is not true")
 print("SyncCore OK")
