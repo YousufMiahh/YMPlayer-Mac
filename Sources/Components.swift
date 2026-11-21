@@ -119,6 +119,7 @@ struct PosterCard: View {
     @State private var hover = false
     @State private var widened = false
     @State private var peekTask: Task<Void, Never>?
+    @State private var peekArt: (logo: URL?, backdrop: URL?) = (nil, nil)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -135,7 +136,21 @@ struct PosterCard: View {
                 )
                 .overlay(RemoteImage(url: item.posterURL, maxPixel: 480))
                 .overlay {
+                    if widened, let b = peekArt.backdrop { RemoteImage(url: b, maxPixel: 900).transition(.opacity) }
+                }
+                .overlay {
                     if widened && store.pagePreviewOwner == item.id { PagePreviewLayer(preview: store.preview) }
+                }
+                .overlay(alignment: .bottomLeading) { // the title's logo over the widened card
+                    if widened, let l = peekArt.logo {
+                        ZStack(alignment: .bottomLeading) {
+                            LinearGradient(colors: [.black.opacity(0.7), .clear], startPoint: .bottom, endPoint: .center)
+                            RemoteImage(url: l, maxPixel: 500, mode: .fit)
+                                .frame(maxWidth: (width ?? 150) * 1.5 * 16 / 9 * 0.55, maxHeight: (width ?? 150) * 1.5 * 0.38, alignment: .bottomLeading)
+                                .padding(12)
+                        }
+                        .transition(.opacity)
+                    }
                 }
                 .overlay(alignment: .bottom) {
                     if let p = progress { ProgressLine(value: p).padding(8) }
@@ -187,7 +202,8 @@ struct PosterCard: View {
 }
 
 extension PosterCard {
-    /// After a moment on the card it widens; a moment later the preview starts. Off the card: back.
+    /// On the card it widens straight away (with TMDB's backdrop and the title's logo), and the
+    /// preview starts as soon as the pointer stays. Off the card: back.
     @MainActor fileprivate func schedulePeek(_ on: Bool) {
         peekTask?.cancel()
         peekTask = nil
@@ -198,10 +214,17 @@ extension PosterCard {
         }
         let it = item
         peekTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            try? await Task.sleep(nanoseconds: 120_000_000) // just passing over it doesn't count
             if Task.isCancelled { return }
             withAnimation(Theme.ease) { widened = true }
-            try? await Task.sleep(nanoseconds: 900_000_000)
+            Task { @MainActor in
+                let kind: Tmdb.Kind = it.kind == .movie ? .movie : .tv
+                let name = it.kind == .episode ? (it.seriesName ?? it.name) : it.name
+                guard let id = await Tmdb.findId(kind, name: name, known: it.tmdb) else { return }
+                let a = await Tmdb.art(kind, id: id)
+                if !Task.isCancelled { withAnimation(.easeOut(duration: 0.25)) { peekArt = a } }
+            }
+            try? await Task.sleep(nanoseconds: 450_000_000)
             if Task.isCancelled { return }
             await store.startCardPreview(it)
         }

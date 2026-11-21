@@ -82,13 +82,37 @@ enum Tmdb {
 
     /// The title's logo (the artwork Netflix and Apple TV show instead of the name): English first,
     /// then one without words; remembered per title (in memory and between launches).
-    static func logo(_ kind: Kind, id: String) async -> URL? {
-        let ck = "tmdbLogo.\(kind.rawValue).\(id)"
-        if let hit = UserDefaults.standard.string(forKey: ck) { return hit.isEmpty ? nil : URL(string: hit) }
-        guard let o = try? await get("/\(kind.rawValue)/\(id)/images?include_image_language=en,null") else { return nil }
-        let u = pickLogo(o["logos"] as? [[String: Any]] ?? [])
-        UserDefaults.standard.set(u ?? "", forKey: ck)
-        return u.flatMap { URL(string: $0) }
+    static func logo(_ kind: Kind, id: String) async -> URL? { await art(kind, id: id).logo }
+
+    /// The logo as above, and a wide picture without words (or an English one) for a card that
+    /// widens on Home. One request, remembered between launches.
+    static func art(_ kind: Kind, id: String) async -> (logo: URL?, backdrop: URL?) {
+        let lk = "tmdbLogo.\(kind.rawValue).\(id)", bk = "tmdbBackdrop.\(kind.rawValue).\(id)"
+        let d = UserDefaults.standard
+        if let l = d.string(forKey: lk), let b = d.string(forKey: bk) {
+            return (l.isEmpty ? nil : URL(string: l), b.isEmpty ? nil : URL(string: b))
+        }
+        guard let o = try? await get("/\(kind.rawValue)/\(id)/images?include_image_language=en,null") else { return (nil, nil) }
+        let l = pickLogo(o["logos"] as? [[String: Any]] ?? [])
+        let b = pickBackdrop(o["backdrops"] as? [[String: Any]] ?? [])
+        d.set(l ?? "", forKey: lk)
+        d.set(b ?? "", forKey: bk)
+        return (l.flatMap { URL(string: $0) }, b.flatMap { URL(string: $0) })
+    }
+
+    /// A backdrop without words first (the logo goes on top), then an English one; most liked.
+    static func pickBackdrop(_ list: [[String: Any]]) -> String? {
+        func rank(_ b: [String: Any]) -> Int {
+            let lang = b["iso_639_1"] as? String ?? ""
+            return lang.isEmpty ? 0 : lang == "en" ? 1 : 9
+        }
+        var best: [String: Any]? = nil
+        for b in list where (b["file_path"] as? String ?? "") != "" && rank(b) < 9 {
+            guard let cur = best else { best = b; continue }
+            let v = (b["vote_average"] as? NSNumber)?.doubleValue ?? 0, cv = (cur["vote_average"] as? NSNumber)?.doubleValue ?? 0
+            if rank(b) < rank(cur) || (rank(b) == rank(cur) && v > cv) { best = b }
+        }
+        return (best?["file_path"] as? String).map { "https://image.tmdb.org/t/p/w780" + $0 }
     }
 
     static func pickLogo(_ logos: [[String: Any]]) -> String? {
