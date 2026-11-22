@@ -120,6 +120,7 @@ struct PosterCard: View {
     @State private var widened = false
     @State private var peekTask: Task<Void, Never>?
     @State private var peekArt: (logo: URL?, backdrop: URL?) = (nil, nil)
+    @State private var peekInfo: Tmdb.Details?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -162,6 +163,19 @@ struct PosterCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(hover ? Theme.focus : Color.clear, lineWidth: 3))
                 .shadow(color: .black.opacity(hover ? 0.5 : 0.2), radius: hover ? 14 : 4, y: hover ? 6 : 3)
                 .scaleEffect(hover ? 1.06 : 1)
+            if widened, let d = peekInfo { // like Netflix: what it is, its age rating and the summary
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 10) {
+                        Text(d.line(series: item.kind != .movie)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        if !d.cert.isEmpty { RatingBadge(cert: d.cert) }
+                    }
+                    if !d.overview.isEmpty {
+                        Text(d.overview).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+                .frame(width: width.map { $0 * 1.5 * 16 / 9 }, alignment: .leading)
+                .transition(.opacity)
+            }
             if showTitle {
                 Text(title ?? item.name)
                     .font(.system(size: 12, weight: .medium))
@@ -221,8 +235,8 @@ extension PosterCard {
                 let kind: Tmdb.Kind = it.kind == .movie ? .movie : .tv
                 let name = it.kind == .episode ? (it.seriesName ?? it.name) : it.name
                 guard let id = await Tmdb.findId(kind, name: name, known: it.tmdb) else { return }
-                let a = await Tmdb.art(kind, id: id)
-                if !Task.isCancelled { withAnimation(.easeOut(duration: 0.25)) { peekArt = a } }
+                guard let d = await Tmdb.details(kind, id: id) else { return }
+                if !Task.isCancelled { withAnimation(.easeOut(duration: 0.25)) { peekArt = (d.logo, d.backdrop); peekInfo = d } }
             }
             try? await Task.sleep(nanoseconds: 450_000_000)
             if Task.isCancelled { return }
@@ -512,5 +526,23 @@ struct OutlinedNumber: View {
         }
         .compositingGroup()
         .shadow(color: .black.opacity(0.5), radius: 6)
+    }
+}
+
+
+/// The UK age rating as a round badge in the BBFC's colours ("15" pink, "18" red…).
+struct RatingBadge: View {
+    let cert: String
+
+    var body: some View {
+        let c = cert.uppercased()
+        let bg: Color = c == "U" ? Color(hex: 0x00A651) : c == "PG" ? Color(hex: 0xFDB913)
+            : (c == "12" || c == "12A") ? Color(hex: 0xF7941D) : c == "15" ? Color(hex: 0xE7378F)
+            : (c == "18" || c == "R18") ? Color(hex: 0xE21D2B) : Color(hex: 0x555560)
+        Text(cert)
+            .font(.system(size: cert.count > 2 ? 8 : 10, weight: .heavy))
+            .foregroundStyle(c == "PG" ? Color.black : Color.white)
+            .frame(width: 22, height: 22)
+            .background(bg, in: Circle())
     }
 }

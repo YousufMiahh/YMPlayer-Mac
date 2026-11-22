@@ -3,3 +3,4 @@
 - Recent Channels: take a channel off the list one at a time (right-click it, on Home or in Live TV → Recently Watched). It comes off your other devices too.
 - Home: point at a film or series and it widens straight away, showing its picture and logo, and starts a preview almost at once.
 - A new launch intro: "YOUSUF MIAH" folds away into its Y and M, which land in the logo.
+- Home, like Netflix: bigger posters, and under the one you're on: series or film, genre, year, seasons or running time, the UK age rating and a summary.

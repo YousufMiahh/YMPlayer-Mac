@@ -56,7 +56,7 @@ struct HomeView: View {
                 if !cont.isEmpty {
                     Shelf(title: "Continue Watching") {
                         ForEach(cont, id: \.item.id) { p in
-                            PosterCard(item: p.item, width: 150,
+                            PosterCard(item: p.item, width: 190,
                                        title: p.item.kind == .episode ? (p.item.seriesName ?? p.item.name) : p.item.name,
                                        subtitle: (p.item.episodeLabel.map { $0 + "  ·  " } ?? "") + (p.position > 0 ? Fmt.clock(p.duration - p.position) + " left" : "Next episode"),
                                        progress: p.fraction,
@@ -69,7 +69,7 @@ struct HomeView: View {
                 if !queue.isEmpty {
                     Shelf(title: "Your Queue", subtitle: "plays next, in order") {
                         ForEach(queue) { it in
-                            PosterCard(item: it, width: 150,
+                            PosterCard(item: it, width: 190,
                                        title: it.displayTitle,
                                        subtitle: it.episodeLabel.map { $0 + "  ·  " + it.name } ?? it.rating,
                                        progress: store.data.progress[it.id]?.fraction,
@@ -113,7 +113,7 @@ struct HomeView: View {
                 ForEach(recs) { row in
                     Shelf(title: row.title, subtitle: row.sourceId == nil ? nil : "right-click for options") {
                         ForEach(row.items) { it in
-                            PosterCard(item: it, width: 150, subtitle: it.kind == .series ? (it.genre ?? "Series") : it.rating, peek: true,
+                            PosterCard(item: it, width: 190, subtitle: it.kind == .series ? (it.genre ?? "Series") : it.rating, peek: true,
                                        action: { store.open(it) },
                                        extraMenu: recMenu(row))
                         }
@@ -122,19 +122,19 @@ struct HomeView: View {
 
                 if !favVod.isEmpty {
                     Shelf(title: "My Favourites") {
-                        ForEach(favVod) { it in PosterCard(item: it, width: 150, subtitle: it.kind == .series ? "Series" : it.rating, peek: true) { store.open(it) } }
+                        ForEach(favVod) { it in PosterCard(item: it, width: 190, subtitle: it.kind == .series ? "Series" : it.rating, peek: true) { store.open(it) } }
                     }
                 }
 
                 if !newMovies.isEmpty {
                     Shelf(title: "Recently Added Movies") {
-                        ForEach(newMovies) { it in PosterCard(item: it, width: 150, subtitle: it.rating, peek: true) { store.open(it) } }
+                        ForEach(newMovies) { it in PosterCard(item: it, width: 190, subtitle: it.rating, peek: true) { store.open(it) } }
                     }
                 }
 
                 if !newSeries.isEmpty {
                     Shelf(title: "Recently Added Series") {
-                        ForEach(newSeries) { it in PosterCard(item: it, width: 150, subtitle: it.genre, peek: true) { store.open(it) } }
+                        ForEach(newSeries) { it in PosterCard(item: it, width: 190, subtitle: it.genre, peek: true) { store.open(it) } }
                     }
                 }
             }

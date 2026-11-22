@@ -84,20 +84,82 @@ enum Tmdb {
     /// then one without words; remembered per title (in memory and between launches).
     static func logo(_ kind: Kind, id: String) async -> URL? { await art(kind, id: id).logo }
 
-    /// The logo as above, and a wide picture without words (or an English one) for a card that
-    /// widens on Home. One request, remembered between launches.
+    /// The logo and wide picture, from details() (one request for everything).
     static func art(_ kind: Kind, id: String) async -> (logo: URL?, backdrop: URL?) {
-        let lk = "tmdbLogo.\(kind.rawValue).\(id)", bk = "tmdbBackdrop.\(kind.rawValue).\(id)"
-        let d = UserDefaults.standard
-        if let l = d.string(forKey: lk), let b = d.string(forKey: bk) {
-            return (l.isEmpty ? nil : URL(string: l), b.isEmpty ? nil : URL(string: b))
+        guard let d = await details(kind, id: id) else { return (nil, nil) }
+        return (d.logo, d.backdrop)
+    }
+
+    /// What Home shows under a card you're on, Netflix-style.
+    struct Details: Equatable {
+        var logo: URL?, backdrop: URL?
+        var genres: [String] = []
+        var year = "", runtime = "", cert = "", overview = ""
+        var seasons = 0
+
+        /// "Series · Thriller · 2026 · 2 Seasons" (the age rating is drawn separately).
+        func line(series: Bool) -> String {
+            var p = [series ? "Series" : "Film"]
+            if let g = genres.first { p.append(g) }
+            if !year.isEmpty { p.append(year) }
+            if series && seasons > 0 { p.append("\(seasons) " + (seasons == 1 ? "Season" : "Seasons")) }
+            if !series && !runtime.isEmpty { p.append(runtime) }
+            return p.joined(separator: "  ·  ")
         }
-        guard let o = try? await get("/\(kind.rawValue)/\(id)/images?include_image_language=en,null") else { return (nil, nil) }
-        let l = pickLogo(o["logos"] as? [[String: Any]] ?? [])
-        let b = pickBackdrop(o["backdrops"] as? [[String: Any]] ?? [])
-        d.set(l ?? "", forKey: lk)
-        d.set(b ?? "", forKey: bk)
-        return (l.flatMap { URL(string: $0) }, b.flatMap { URL(string: $0) })
+    }
+
+    @MainActor private static var detailsCache: [String: Details] = [:]
+
+    /// Genres, year, seasons or running time, the UK age rating, the summary, the logo and the wide
+    /// picture: one request, remembered (in memory, and for a week between launches).
+    static func details(_ kind: Kind, id: String) async -> Details? {
+        let ck = "tmdbDetails.\(kind.rawValue).\(id)"
+        if let hit = await MainActor.run(body: { detailsCache[ck] }) { return hit }
+        var o: [String: Any]? = nil
+        if let w = UserDefaults.standard.dictionary(forKey: ck), let at = w["at"] as? Double,
+           Date().timeIntervalSince1970 - at < 7 * 86400 { o = w["d"] as? [String: Any] }
+        if o == nil {
+            let tv = kind == .tv
+            guard let r = try? await get("/\(kind.rawValue)/\(id)?append_to_response=images,\(tv ? "content_ratings" : "release_dates")&include_image_language=en,null") else { return nil }
+            let images = r["images"] as? [String: Any]
+            var slim: [String: Any] = [:]
+            slim["genres"] = ((r["genres"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
+            slim["date"] = (r["first_air_date"] as? String) ?? (r["release_date"] as? String) ?? ""
+            slim["seasons"] = (r["number_of_seasons"] as? Int) ?? 0
+            slim["runtime"] = (r["runtime"] as? Int) ?? 0
+            slim["overview"] = (r["overview"] as? String) ?? ""
+            slim["logo"] = pickLogo(images?["logos"] as? [[String: Any]] ?? []) ?? ""
+            slim["backdrop"] = pickBackdrop(images?["backdrops"] as? [[String: Any]] ?? []) ?? ""
+            slim["cert"] = ukRating(r, tv: tv)
+            UserDefaults.standard.set(["at": Date().timeIntervalSince1970, "d": slim], forKey: ck)
+            o = slim
+        }
+        guard let o else { return nil }
+        var d = Details()
+        d.logo = (o["logo"] as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        d.backdrop = (o["backdrop"] as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        d.genres = ((o["genres"] as? [String]) ?? []).map { $0.replacingOccurrences(of: "Action & Adventure", with: "Action").replacingOccurrences(of: "Sci-Fi & Fantasy", with: "Sci-Fi") }
+        let date = o["date"] as? String ?? ""
+        d.year = date.count >= 4 ? String(date.prefix(4)) : ""
+        d.seasons = o["seasons"] as? Int ?? 0
+        let mins = o["runtime"] as? Int ?? 0
+        d.runtime = mins <= 0 ? "" : mins >= 60 ? "\(mins / 60)h \(mins % 60)m" : "\(mins)m"
+        d.cert = o["cert"] as? String ?? ""
+        d.overview = o["overview"] as? String ?? ""
+        let done = d
+        await MainActor.run { detailsCache[ck] = done }
+        return d
+    }
+
+    /// The UK (BBFC) rating: "U", "PG", "12", "12A", "15", "18", or "".
+    static func ukRating(_ r: [String: Any], tv: Bool) -> String {
+        if tv {
+            let res = (r["content_ratings"] as? [String: Any])?["results"] as? [[String: Any]] ?? []
+            return res.first { $0["iso_3166_1"] as? String == "GB" }?["rating"] as? String ?? ""
+        }
+        let res = (r["release_dates"] as? [String: Any])?["results"] as? [[String: Any]] ?? []
+        let gb = res.first { $0["iso_3166_1"] as? String == "GB" }?["release_dates"] as? [[String: Any]] ?? []
+        return gb.compactMap { $0["certification"] as? String }.first { !$0.isEmpty } ?? ""
     }
 
     /// A backdrop without words first (the logo goes on top), then an English one; most liked.
