@@ -4,3 +4,4 @@
 - Home: point at a film or series and it widens straight away, showing its picture and logo, and starts a preview almost at once.
 - A new launch intro: "YOUSUF MIAH" folds away into its Y and M, which land in the logo.
 - Home, like Netflix: bigger posters, and under the one you're on: series or film, genre, year, seasons or running time, the UK age rating and a summary.
+- Continue Watching: stop an episode in its last 3 minutes (the credits) and it counts as watched, with the next episode waiting in Continue Watching, even across seasons.
